@@ -101,3 +101,73 @@ const foo = (bar: any) => bar
 ```ts
 const foo = <T extends any>(bar: T): T => bar
 ```
+
+## 三、Vue.js3的设计思路
+
+### 声明式描述UI
+
+Vue使用贴近原生的描述方式来进行声明式描述UI，也可以用虚拟DOM的方式，会更灵活
+
+### 渲染器
+
+就是把虚拟DOM变成真实DOM的一段程序
+
+比如现在有个虚拟DOM长这样
+
+```js
+const vnode = {
+    tag: 'div',
+    props: {
+        onClick: () => alert('qnyd')
+    },
+    children: '不错'
+}
+```
+
+```js
+const render = (vnode, container) => {
+    const el = document.createElement(vnode.tag)
+    for (const key in vnode.props) {
+        if (/^on/.test(key)) {
+            el.addEventListener(
+                key.subStr(2).toLowerCase(),
+                vnode.props[key]
+            )
+        }
+    }
+
+    if (typeof vnode.children === 'string') {
+        el.appendChild(document.createTextNode(vnode.children))
+    } else if (Array.isArray(vnode.children)) {
+        vnode.children.forEach((node) => render(node, el))
+    }
+
+    container.appendChild(el)
+}
+```
+
+### 组件的本质
+
+就是一组虚拟DOM元素的封装
+
+类似这样
+
+```js
+const vnode = {
+    tag: 'div',
+    props: {
+        onClick: () => alert('qnyd')
+    },
+    children: '不错'
+}
+
+const component = () => vnode
+```
+
+### 模板的工作原理
+
+通过编译器编译成虚拟DOM
+
+### 模块化
+
+编译器、渲染器等各个模块互相关联、互相制约、共同构成一个有机整体
