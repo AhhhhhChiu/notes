@@ -171,3 +171,148 @@ const component = () => vnode
 ### 模块化
 
 编译器、渲染器等各个模块互相关联、互相制约、共同构成一个有机整体
+
+## 四、响应式系统的作用与实现
+
+### 响应式数据与副作用函数
+
+运行会产生副作用的函数就是副作用函数，比如
+
+```js
+// 副作用修改了body
+function effect() {
+    document.body.innerText = 'qnyd'
+}
+```
+
+响应式数据是什么呢，当我们修改obj.text的时候，如果effect能重新执行，obj就是响应式数据
+
+```js
+const obj = { text: 'qnyd' }
+function effect() {
+    document.body.innerText = obj.text
+}
+```
+
+### 响应式数据的基本实现
+
+- 执行 `effect` 函数的时候触发 `读取` 操作
+- 修改 `obj.text` 的时候触发 `写入` 操作
+
+因此如果在读取 `obj.text` 的时候将依赖该值的副作用函数全部收集起来，触发写入操作的时候再把这些副作用函数都执行一遍就实现了响应式
+
+```js
+// 存储依赖的桶子
+const bucket = new Set()
+
+// original data
+const data = { text: 'qnyd' }
+// 代理
+const proxyData = new Proxy(data, {
+    get(target, key) {
+        bucket.add(effect)
+        return target[key]
+    },
+    set(target, key, newVal) {
+        target[key] = newVal
+        bucket.forEach((fn) => fn())
+        return true
+    }
+})
+```
+
+### 设计一个完善的响应式系统
+
+上面实现的响应式系统存在2个问题（其他的后面再说）
+1. 直接通过名字(effect)来获取副作用函数很不灵活
+2. 给对象设置新属性的时候会触发副作用函数
+
+解决第一个问题需要提供一个注册副作用函数的机制
+```js
+// 全局变量存放被注册函数
+let activeEffect
+// 注册器
+function effect(fn) {
+    activeEffect = fn
+    fn()
+}
+// 稍稍改造一下代理过程
+const proxyData = new Proxy(data, {
+    get(target, key) {
+        activeEffect && bucket.add(activeEffect) // 新增
+        return target[key]
+    },
+    set(target, key, newVal) {/*...*/}
+})
+```
+
+这样就不依赖副作用函数的名字了
+
+然后来看看第二个问题
+
+```js
+effect(() => {
+    console.log('qnyd') // 会打印两次
+    document.body.innerText = obj.text
+})
+// 副作用函数中并没有读取这个属性
+// 正常来说设置该属性时不应该触发副作用函数
+// 但是触发了
+obj.notExist = 'abc'
+```
+
+问题在于我们`没有在副作用函数与被操作的目标字段之间建立明确的联系`，所以来重新整个桶子
+
+```js
+const track = (target, key) => {
+    // 同样的 没有副作用函数直接不玩
+    if (activeEffect) return 
+    const depsMap = bucket.get(target)
+    if (!depsMap) {
+        bucket.set(target, (depsMap = new Map()))
+    }
+    let deps = depsMap.get(key)
+    if (!deps) {
+        depsMap.set(key, (deps = new Set()))
+    }
+    deps.add(activeEffect)
+}
+
+const trigger = (target, key) => {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    const effects = depsMap.get(key)
+    effects && effects.forEach((fn) => fn())
+}
+
+const proxyData = new Proxy(data, {
+    get(target, key) {
+        track(target, key)
+        return target[key]
+    },
+    set(target, key, newVal) {
+        target[key] = newVal
+        trigger(target, key)
+    }
+})
+```
+
+桶子之前是这样的
+
+```
+bucket: [effect1, effect2, effect3...]
+```
+
+现在是这样的
+
+```
+bucket: {
+    obj1: {
+        attr1: [effect1, effect2...],
+        attr2: [effect3, effect4...]
+    },
+    obj2: {
+        attr3: [effect5, effect6...]
+    }
+}
+```
