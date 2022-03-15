@@ -264,6 +264,7 @@ obj.notExist = 'abc'
 问题在于我们`没有在副作用函数与被操作的目标字段之间建立明确的联系`，所以来重新整个桶子
 
 ```js
+const bucket = new WeakMap()
 const track = (target, key) => {
     // 同样的 没有副作用函数直接不玩
     if (activeEffect) return 
@@ -316,3 +317,5 @@ bucket: {
     }
 }
 ```
+
+bucket使用WeakMap的原因是因为它对key是弱引用，并不会影响垃圾回收，具体可以看看WeakMap和Map的区别
