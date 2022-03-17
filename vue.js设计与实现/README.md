@@ -319,3 +319,133 @@ bucket: {
 ```
 
 bucket使用WeakMap的原因是因为它对key是弱引用，并不会影响垃圾回收，具体可以看看WeakMap和Map的区别
+
+### 分支切换与cleanup
+
+遗留的副作用函数会导致不必要的更新
+
+```js
+const data = { ok: true, text: 'qnyd' }
+const proxyData = new Proxy(data, { /*...*/ })
+
+effect(() => {
+    document.body.innerText = obj.ok ? obj.text : 'not'
+})
+```
+
+此时修改obj.ok会触发副作用函数
+
+```js
+obj.ok = false
+```
+
+且同时obj.text不会被读取，我们希望修改obj.text时副作用函数不被重新执行，但事实上是会的
+
+解决的思路是这样，因为每次执行副作用函数时，都会往桶子里收集依赖，但在这次新的收集过程中是不会包括没用的依赖的，举个栗子，第二次修改ok的值时
+
+
+```js
+/**
+ * 修改值触发set操作 -> trigger
+ */
+obj.ok = false
+
+/**
+ * 取出依赖这个 key <<ok>> 的所有副作用函数并执行
+ */
+deps.forEach((fn) => fn())
+
+/**
+ * 也就是下面这个函数
+ * 这个时候被执行读操作的只有ok这个key
+ * text不会重新track了
+ */ 
+() => {
+    document.body.innerText = obj.ok ? obj.text : 'not'
+}
+```
+
+那么只要在执行副作用函数前，解除掉所有关联到这个函数的依赖就可以了，因为执行完会建立起新的、正确的依赖
+
+所以需要知道都有谁和这个副作用函数建立了联系，需要重新设计effect
+
+```js
+let activeEffect
+// 注册器原先是这样的
+// function effect(fn) {
+//     activeEffect = fn
+//     fn()
+// }
+function effect(fn) {
+    // 先用一个函数把之前的逻辑包裹起来
+    const effectFn = () => {
+        activeEffect = effectFn
+        fn()
+    }
+    // 然后给这个函数挂一个deps属性
+    // 用来记录谁和本函数建立了联系
+    effectFn.deps = []
+    // 正常的执行一次
+    effectFn()
+}
+```
+
+effectFn.deps如何收集，就要回到我们是如果收集这个fn到bucket里了，答案是在track里，也就是做key的get操作时
+
+```js
+const track = (target, key) => {
+    if (activeEffect) return 
+    const depsMap = bucket.get(target)
+    if (!depsMap) {
+        bucket.set(target, (depsMap = new Map()))
+    }
+    let deps = depsMap.get(key)
+    if (!deps) {
+        depsMap.set(key, (deps = new Set()))
+    }
+    deps.add(activeEffect)
+
+    // deps就是一个与当前副作用函数存在联系的依赖合集
+    // 将其添加到activeEffect.deps数组中
+    activeEffect.deps.push(deps)
+}
+```
+
+然后我们要做的就是在每次执行副作用函数前，解除掉所有关联到这个函数的依赖
+
+```js
+const cleanup = (effectFn) => {
+    effectFn.deps.forEach((deps) => {
+        // 将自己从有联系的依赖合集里去掉
+        deps.delete(effectFn)
+    })
+    // 现在没人依赖我了
+    effectFn.deps.length = 0
+}
+
+let activeEffect
+function effect(fn) {
+    const effectFn = () => {
+        cleanup(effectFn) // 清除一下
+        activeEffect = effectFn
+        fn()
+    }
+    effectFn.deps = []
+    effectFn()
+}
+```
+
+修改一下trigger避免无限循环（具体问题引起参照书中代码）
+
+```js
+const trigger = (target, key) => {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    const effects = depsMap.get(key)
+    const effectsToRun = new Set(effects)
+    effectsToRun.forEach((fn) => fn())
+    // effects && effects.forEach((fn) => fn())
+}
+```
+
+这样就可以避免有副作用函数产生遗留了
