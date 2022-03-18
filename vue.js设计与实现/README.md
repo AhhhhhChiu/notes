@@ -449,3 +449,119 @@ const trigger = (target, key) => {
 ```
 
 这样就可以避免有副作用函数产生遗留了
+
+### 嵌套的 effect 与 effect 栈
+
+目前的设计是不适用与嵌套的情况的，举个例子
+
+```js
+const data = { foo: true, bar: true }
+const proxyData = new Proxy(data, { /*...*/ })
+
+let temp
+effect(() => {
+    console.log('外层执行')
+    effect(() => {
+        console.log('里层执行')
+        temp = data.foo
+    })
+    temp = data.bar
+})
+
+setTimeout(() => {
+    data.bar = false
+}, 1000)
+```
+
+我们期望的结果是，执行完副作用函数之后建立起这样的联系
+
+```js
+bucket: {
+    data: {
+        foo: [里层的函数],
+        bar: [外层的函数]
+    }
+}
+```
+
+修改了bar的值为false，自然去执行外层函数，然后间接触发里层函数。所以我们期望的打印结果应该是这样
+
+```js
+外层执行
+里层执行
+外层执行
+里层执行
+```
+
+可实际上确实这样的
+
+```js
+外层执行
+里层执行
+里层执行
+```
+
+很显然原因在于我们的全局变量activeEffect，我们用它来存储副作用函数，这意味着只能存一个
+
+```js
+// 这段代码的运行大概是这样
+
+// 1. 通过effect注册「外」层的副作用函数
+// 2. 此时activeEffect存储「外」层函数
+// 3. 存完了开始执行「外」层的副作用函数
+// 4. 通过effect注册「里」层的副作用函数
+// 5. 此时activeEffect存储「里」层函数
+// 6. 存完了开始执行「里」层的副作用函数
+// 7. 执行到了「里」层对foo键的读操作
+// 8. 收集activeEffect(存的「里」层函数)作为依赖
+// 9. 执行到了「外」层对bar键的读操作
+// 10. 收集activeEffect(存的「里」层函数)作为依赖
+let activeEffect
+function effect(fn) {
+    const effectFn = () => {
+        cleanup(effectFn)
+        activeEffect = effectFn // 2 5
+        fn()
+    }
+    effectFn.deps = []
+    effectFn()
+}
+
+let temp
+effect(() => {// 1
+    console.log('外层执行') // 3
+    effect(() => { // 4
+        console.log('里层执行') // 6
+        temp = data.foo // 7
+    })
+    temp = data.bar // 9
+})
+```
+
+其实就是外层函数还没走到收集依赖那步，存放副作用函数的全局变量就被里面的给覆盖了（把temp = data.bar放在里层函数执行前试试，就发现trigger前bucket里的数据没有错了）感觉我很笨，想了好一会才明白为什么被覆盖
+
+要解决这个问题就需要换一种方式来存放副作用函数
+
+```js
+let activeEffect
+
+// 维护一个effect栈
+const effectStack = []
+function effect(fn) {
+    const effectFn = () => {
+        cleanup(effectFn)
+        activeEffect = effectFn
+        // 执行前把副作用函数压入栈中
+        effectStack.push(activeEffect)
+        fn()
+        // 执行完将当前副作用函数弹出栈
+        effectStack.pop()
+        // 同时把当前激活函数指向栈顶
+        activeEffect = effectStack[effectStack.length - 1]
+    }
+    effectFn.deps = []
+    effectFn()
+}
+```
+
+代入刚刚那个例子就很快想明白了
