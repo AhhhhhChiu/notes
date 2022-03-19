@@ -1,5 +1,7 @@
 # Vue.js设计与实现
 
+最近一直被各种狂轰乱炸安利这本书，最终还是买了下来，小一百块钱感觉小贵，感觉不能白看，一边看一边随便写点读书笔记，加深理解后面也可以翻看，over
+
 ## 一、权衡的艺术
 
 ### 命令式和声明式
@@ -565,3 +567,96 @@ function effect(fn) {
 ```
 
 代入刚刚那个例子就很快想明白了
+
+### 避免无线递归循环
+
+当前的响应式系统容易出现无限递归循环的问题
+
+```js
+const proxyData = new Proxy({ foo: 1 }, {/*...*/})
+effect(() => proxyData.foo++) // 爆栈
+```
+
+原因在于副作用函数其实相当于`proxyData.foo = proxyData.foo + 1`，对foo这个字段同时进行了读和写的操作，读的时候track了当前副作用函数，写又trigger了一次，然后又是读写无限递归调用，于是就产生了栈溢出
+
+解决这个问题需要增加一个判断：`如果trigger触发执行的副作用函数与正在执行的副作用函数相同，则不触发执行`
+
+```js
+const trigger = (target, key) => {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    const effects = depsMap.get(key)
+    const effectsToRun = new Set()
+    effects && effects.forEach((fn) => {
+        // 如果trigger触发执行的副作用函数与当前正在执行的副作用函数相同，则不触发执行
+        if (fn !== activeEffect) {
+            effectsToRun.add(fn)
+        }
+    })
+    effectsToRun.forEach((fn) => fn())
+}
+```
+
+### 调度执行
+
+可调度性的意思就是`让用户有能力决定副作用函数执行的时机，次数以及方式`
+
+```js
+// 像挂deps一样，我们给effect多挂一个options，允许用户指定调度器
+function effect(fn, options = {}) {
+    const effectFn = () => {
+        cleanup(effectFn)
+        activeEffect = effectFn
+        effectStack.push(activeEffect)
+        fn()
+        effectStack.pop()
+        activeEffect = effectStack[effectStack.length - 1]
+    }
+    effectFn.options = options // 这里
+    effectFn.deps = []
+    effectFn()
+}
+```
+
+在trigger里做分支判断，如果用户指定了调度器，则把副作用函数的执行控制权交给用户
+
+```js
+const trigger = (target, key) => {
+    const depsMap = bucket.get(target)
+    if (!depsMap) return
+    const effects = depsMap.get(key)
+    const effectsToRun = new Set()
+    effects && effects.forEach((fn) => {
+        if (fn !== activeEffect) {
+            effectsToRun.add(fn)
+        }
+    })
+    effectsToRun.forEach((fn) => {
+        // 如果用户自定义了调度器，则把副作用函数注入
+        if (fn.options.scheduler) {
+            fn.options.scheduler(fn)
+        } else {
+            // 否则直接执行
+            fn()
+        }
+    })
+}
+```
+
+此时我们的响应式系统就有了调度功能。另外，书中有个任务队列的代码很有意思，我这里摘抄过来
+
+```js
+const jobQueue = new Set()
+const p = Promise.resolve()
+
+let isFlushing = false
+function flushJob() {
+    if (isFlushing) return
+    isFlushing = true
+    p.then(() => {
+        jobQueue.forEach((job) => job())
+    }).finally(() => {
+        isFlushing = false
+    })
+}
+```
