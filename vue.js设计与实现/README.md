@@ -660,3 +660,122 @@ function flushJob() {
     })
 }
 ```
+
+### 计算属性 computed 与 lazy
+
+要实现一个 computed，我们需要先让 effect 具有懒执行的能力，并且需要获得副作用函数的执行结果
+
+```js
+function effect(fn, options = {}) {
+    const effectFn = () => {
+        cleanup(effectFn)
+        activeEffect = effectFn
+        effectStack.push(activeEffect)
+        const res = fn() // 保存结果
+        effectStack.pop()
+        activeEffect = effectStack[effectStack.length - 1]
+        return res // 返回
+    }
+    effectFn.options = options
+    effectFn.deps = []
+    // 如果不是 lazy 才立即执行
+    if (!options.lazy) {
+        effectFn()
+    }
+    // 将副作用函数作为返回值
+    return effectFn
+}
+
+const effectFn = effect(
+    () => foo + bar, // 传入一个 getter 作为副作用函数
+    { lazy: true } // 新增
+)
+const value = effectFn() // 手动执行获取 getter 的值
+```
+
+基于此封装一个简易的 computed
+
+```js
+function computed (getter) {
+    const effectFn = effect(getter, { lazy: true })
+    const obj = {
+        get value() {
+            return effectFn()
+        }
+    }
+    return obj
+}
+
+const proxyData = new Proxy({ foo: 1, bar: 2 }, { /*...*/ })
+const sum = computed(() => proxyData.foo + proxyData.bar)
+console.log('sum: ', sum.value)
+```
+
+computed可以正常的工作，但是还无法对值进行缓存，执行多次`console.log('sum: ', sum.value)`会导致effectFn 进行重复计算
+
+```js
+function computed (getter) {
+    let value // 用于缓存值
+    let dirty = true // 用来标识值是否需要重新计算
+    const effectFn = effect(getter, {
+        lazy: true,
+        scheduler() {
+            // 值发生变化时需要重新计算
+            dirty = true
+        }
+    })
+    const obj = {
+        get value() {
+            // 计算判断
+            if (dirty) {
+                value = effectFn()
+                dirty = false
+            }
+            return value
+        }
+    }
+    return obj
+}
+```
+
+此时 computed 已经趋于完美，但还有一个缺陷，它体现在当我们在另外一个 effect 中读取计算属性的值时：
+
+```js
+const proxyData = new Proxy({ foo: 1, bar: 2 }, { /*...*/ })
+const sum = computed(() => proxyData.foo + proxyData.bar)
+
+effect(() => {
+    // 在另一个 effect 中读取 sum 的值
+    console.log(sum.value)
+})
+proxyData.foo++ // 这次修改并不会触发以上 effect 执行
+```
+
+书里的解释我并不是很明白，我自己的理解是： `effect` 中读取值后建立依赖关系以及触发重新执行这两件事情是由 `Proxy` 数据中的 `track` 和 `trigger` 做的，而 `computed` 中返回的这个 `obj` 里并没有实现这俩兄弟，导致的 `effect` 不能正常工作
+
+所以我们需要为 `computed` 手动去 `track` 和 `trigger`
+
+```js
+function computed (getter) {
+    let value
+    let dirty = true
+    const effectFn = effect(getter, {
+        lazy: true,
+        scheduler() {
+            dirty = true
+            trigger(obj, 'value') // 手动触发
+        }
+    })
+    const obj = {
+        get value() {
+            if (dirty) {
+                value = effectFn()
+                dirty = false
+            }
+            track(obj, 'value') // 手动收集
+            return value
+        }
+    }
+    return obj
+}
+```
