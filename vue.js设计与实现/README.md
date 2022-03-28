@@ -779,3 +779,74 @@ function computed (getter) {
     return obj
 }
 ```
+
+### watch 的实现原理
+
+watch 本质就是监听变化、执行回调
+
+```js
+function watch(data, cb) {
+    effect(
+        () => traverse(data), // 递归读取
+        {
+            scheduler() {
+                cb()
+            }
+        }
+    )
+}
+
+function traverse(data, seen = new Set()) {
+    if (typeof data !== 'object' || data === null || seen.has(data)) return
+    // 代表读取过了 避免循环引用导致死循环
+    seen.add(data)
+    for(const key in data) {
+        traverse(data[key], seen)
+    }
+    return value
+}
+```
+
+除了传入一个响应式数据以外，也可以支持传入一个内部读取响应式数据的 getter
+
+```js
+const proxyData = new Proxy({ foo: 1 }, {/*...*/})
+watch(() => proxyData.foo, () => {
+    console.log('proxyData.foo: ', proxyData.foo)
+})
+
+function watch(data, cb) {
+    const getter = typeof data === 'function'
+        ? data : () => traverse(data)
+    effect(
+        getter,
+        {
+            scheduler() {
+                cb()
+            }
+        }
+    )
+}
+```
+
+新旧值注入回调函数
+
+```js
+function watch(data, cb) {
+    let oldVal // 新增
+    const getter = typeof data === 'function'
+        ? data : () => traverse(data)
+    const effectFn = effect(
+        getter,
+        {
+            lazy: true, // 开启 lazy 模式
+            scheduler() {
+                const newVal = effectFn()
+                cb(newVal, oldVal) // 注入
+                oldVal = newVal
+            }
+        }
+    )
+    oldVal = effectFn() // 手动调用拿到旧值
+}
+```
