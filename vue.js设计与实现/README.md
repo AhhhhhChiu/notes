@@ -847,6 +847,86 @@ function watch(data, cb) {
             }
         }
     )
-    oldVal = effectFn() // 手动调用拿到旧值
+    // 手动调用拿到旧值 但感觉直接 effectFn() 就可以了 不明白为什么要赋给 oldVal
+    oldVal = effectFn()
+}
+```
+
+### 立即执行的 watch 与回调执行时机
+
+目前的 `watch` 回调只会在响应式数据发生变化时才会执行，而 Vue 中是可以通过传入 `immediate` 来控制是否立即执行时机的
+
+```js
+function watch(data, cb, options) {
+    let oldVal
+    const getter = typeof data === 'function'
+        ? data : () => traverse(data)
+
+    // 把先前 scheduler 里的东西抽出来
+    const job = () => {
+        const newVal = effectFn()
+        cb(newVal, oldVal)
+        oldVal = newVal
+    }
+    const effectFn = effect(
+        getter,
+        {
+            lazy: true,
+            scheduler: job
+        }
+    )
+
+    // 是否立即执行
+    if (options.immediate) {
+        job()
+    } else {
+        oldVal = effectFn()
+    }
+}
+```
+
+除了 `immediate` 以外，还可以通过 `flush` 来指定回调的执行时机
+
+```js
+watch(getter, console.log, {
+    /**
+     *  pre: 回调函数在 watch 创建时执行
+     *  post: 调度函数需要将副作用函数放到一个微任务队列中执行
+     *  sync: 同步执行
+     */
+    flush: 'post'
+})
+
+function watch(data, cb, options) {
+    let oldVal
+    const getter = typeof data === 'function'
+        ? data : () => traverse(data)
+
+    const job = () => {
+        const newVal = effectFn()
+        cb(newVal, oldVal)
+        oldVal = newVal
+    }
+    const effectFn = effect(
+        getter,
+        {
+            lazy: true,
+            scheduler: () => {
+                // 微任务
+                if (options.flush === 'post') {
+                    const p = Promise.resolve()
+                    p.then(job)
+                } else {
+                    job() // 同步执行
+                }
+            }
+        }
+    )
+
+    if (options.immediate) {
+        job()
+    } else {
+        oldVal = effectFn()
+    }
 }
 ```
