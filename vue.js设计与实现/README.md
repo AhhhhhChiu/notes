@@ -930,3 +930,85 @@ function watch(data, cb, options) {
     }
 }
 ```
+
+### 过期的副作用
+
+来看一个场景，假设我们连续修改 `obj` 的值两次，会触发两次请求
+
+```js
+let finalData
+watch(obj, async () => {
+    const res = await fetch('/api/example)
+    finalData = res
+})
+
+/**
+ * Client ------ request  A ----> Server
+ * Client ------ request  B ----> Server
+ * Client <----- response B ----- Server
+ * Client <----- response A ----- Server
+ */
+```
+
+由于 `B` 请求是后发的，我们认为 `response B` 才是最新的数据，而请求 `A` 已经过期，其结果 `response A` 应该被视为无效
+
+在 `Vue` 中，`watch` 函数的回调函数有第三个参数 `onInvalidate` 函数，可以用来注册一个回调在当前副作用函数过期时执行，所以以上的例子可以改造为：
+
+```js
+let finalData
+watch(obj, async (newVal, oldVal, onInvalidate) => {
+    // 标识当前副作用函数是否过期
+    let expired = false
+    onInvalidate(() => {
+        // 过期回调时置为 true
+        expired = true
+    })
+    const res = await fetch('/api/example')
+    if (!expired) {
+        // 没有过期才赋给 finalData
+        finalData = res
+    }
+})
+```
+
+`onInvalidate` 的原理很简单，在 `watch` 内部每次检测到变更后，在副作用函数重新执行之前，会先调用我们通过 `onInvalidate` 函数注册的过期回调
+
+```js
+function watch(data, cb, options) {
+    let oldVal
+    let cleanup // 过期回调
+    const onInvalidate = (fn) => {
+        cleanup = fn
+    }
+    const getter = typeof data === 'function'
+        ? data : () => traverse(data)
+
+    const job = () => {
+        const newVal = effectFn()
+        cleanup && cleanup()
+        cb(newVal, oldVal, onInvalidate)
+        oldVal = newVal
+    }
+    const effectFn = effect(
+        getter,
+        {
+            lazy: true,
+            scheduler: () => {
+                // 微任务
+                if (options.flush === 'post') {
+                    const p = Promise.resolve()
+                    p.then(job)
+                } else {
+                    job()
+                }
+            }
+        }
+    )
+
+    if (options.immediate) {
+        job()
+    } else {
+        oldVal = effectFn()
+    }
+}
+```
