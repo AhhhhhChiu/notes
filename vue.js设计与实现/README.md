@@ -1012,3 +1012,59 @@ function watch(data, cb, options) {
     }
 }
 ```
+
+## 五、非原始值的响应式方案
+
+### 理解 Proxy 和 Reflect
+
+#### Proxy
+
+使用 `Proxy` 可以创建一个 `代理对象`，对 `其他对象` 的 `基本语义` 的 `代理`，即` 拦截` 和 `重新定义` 对象的基本操作
+
+什么是基本语义？对一个对象的 `读` `写` 等操作就属于基本语义的操作，即 `基本操作`，与之对应的有 `复合操作`
+
+```js
+const obj = {
+    foo: 1,
+    bar: () => {
+        console.log(2)
+    }
+}
+
+obj.foo // 基本操作
+obj.bar() // 复合操作，包含了 get 和 apply 两个操作
+```
+
+Proxy 只能拦截基本操作
+
+```js
+const p = new Proxy(obj, {
+    get() {
+        // do something
+    },
+    set() {
+        // do something
+    }
+})
+```
+
+Proxy 构造函数接收两个参数，第一个是被代理对象，第二个对象是一组 `捕捉器(traps)`，用来捕获拦截被代理对象的基本操作
+
+#### Reflect
+
+Reflect 是一个内置的全局对象，它提供拦截 JavaScript 操作的方法。这些方法与 Proxy 拦截器的方法相同。Reflect 不是一个函数对象，因此它是不可构造的
+
+```js
+const obj = { foo: 'bar' }
+Reflect.get(obj, 'foo') // 'bar' 等价于 obj.foo
+```
+
+Reflect 的所有方法都比 Proxy 拦截器方法多一个入参 `receiver`，可以理解为 `this`
+
+```js
+// 书里说的这个例子我试了一下，结果不一样
+const obj = { foo: 1 }
+console.log(obj, foo, { foo: 2 }) // 书里说是2 但我的结果还是1
+
+// 还是不太理解 receiver 的概念
+```
