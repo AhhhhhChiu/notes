@@ -1059,12 +1059,62 @@ const obj = { foo: 'bar' }
 Reflect.get(obj, 'foo') // 'bar' 等价于 obj.foo
 ```
 
-Reflect 的所有方法都比 Proxy 拦截器方法多一个入参 `receiver`，可以理解为 `this`
+Reflect 的所有方法都比 Proxy 拦截器方法多一个入参 `receiver`，可以理解为 `this`，这里来看一个例子
 
 ```js
-// 书里说的这个例子我试了一下，结果不一样
-const obj = { foo: 1 }
-console.log(obj, foo, { foo: 2 }) // 书里说是2 但我的结果还是1
+// 不使用 Reflect
+const obj = {
+  foo: 1,
+  get bar() {
+    return this.foo
+  }
+}
 
-// 还是不太理解 receiver 的概念
+const p = new Proxy(obj, {
+  get(target, key) {
+    track(target, key)
+    return target[key]
+  },
+  set(target, key, newVal) {
+    target[key] = newVal
+    trigger(target, key)
+  }
+})
+
+effect(() => {
+    console.log(p.bar) // 读取 bar 建立联系
+})
+
+p.foo++ // 并不会触发重新执行副作用函数
 ```
+
+在这个例子中，`p.bar` 执行了 `get bar()`，进而读取了 `foo` 属性，所以我们预期是 `foo` 和副作用函数建立了联系，当 `foo` 变化时，副作用函数应该重新执行，可事实却没有
+
+原因在于 `p.bar` 时，代理对象是通过 `target[bar]` 来访问到 `bar` 属性的，而 `target` 是原始对象，即 `obj`
+
+```js
+    // 相当于代理对象通过 obj.bar 访问到这个函数
+    get bar() {
+        return this.foo // this 此时指向 obj
+    }
+```
+
+也就是我们没有通过代理对象 `p` 来访问 `foo` 属性，就不存在建立联系了
+
+我们使用 `Reflect` 来改写一下
+
+```js
+const p = new Proxy(obj, {
+  get(target, key, receiver) {
+    track(target, key)
+    // 使用 Reflect.get 返回读取结果，receiver 代表谁在读取该参数
+    return Reflect.get(target, key, receiver)
+  },
+  set(target, key, newVal) {
+    target[key] = newVal
+    trigger(target, key)
+  }
+})
+```
+
+此时我们知道 `receiver` 是代理对象 `p`，而 `get bar()` 中的 `this` 也指向了 `p`
