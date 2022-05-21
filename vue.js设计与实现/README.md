@@ -1118,3 +1118,74 @@ const p = new Proxy(obj, {
 ```
 
 此时我们知道 `receiver` 是代理对象 `p`，而 `get bar()` 中的 `this` 也指向了 `p`
+
+### JavaScript 对象及 Proxy 的工作原理
+
+JavaScript 中一切皆对象。ECMAScript 规范中指出，JavaScript 中有两种对象，一种是 `常规对象(ordinary object)`，另一种是 `异质对象(exotic object)`。如何区分，我们需要先了解对象的内部方法和内部槽。
+
+当我们对一个对象进行操作时，实际上引擎会调用对象的内部方法(internal method)。ECMAScript 中规范了所有必要的内部方法：
+
+Internal Method|Signature|Description
+|-|-|-|
+[[GetPrototypeOf]] | ( ) → Object \| Null | Determine the object that provides inherited properties for this object. A null value indicates that there are no inherited properties.
+[[SetPrototypeOf]] | (Object \| Null) → Boolean | Associate this object with another object that provides inherited properties. Passing null indicates that there are no inherited properties. Returns true indicating that the operation was completed successfully or false indicating that the operation was not successful.
+[[IsExtensible]] | ( ) → Boolean | Determine whether it is permitted to add additional properties to this object.
+[[PreventExtensions]] | ( ) → Boolean | Control whether new properties may be added to this object. Returns true if the operation was successful or false if the operation was unsuccessful.
+[[GetOwnProperty]] | (propertyKey) → Undefined \| Property Descriptor | Return a Property Descriptor for the own property of this object whose key is propertyKey, or undefined if no such property exists.
+[[DefineOwnProperty]] | (propertyKey, PropertyDescriptor) → Boolean | Create or alter the own property, whose key is propertyKey, to have the state described by PropertyDescriptor. Return true if that property was successfully created/updated or false if the property could not be created or updated.
+[[HasProperty]] | (propertyKey) → Boolean | Return a Boolean value indicating whether this object already has either an own or inherited property whose key is propertyKey.
+[[Get]] | (propertyKey, Receiver) → any | Return the value of the property whose key is propertyKey from this object. If any ECMAScript code must be executed to retrieve the property value, Receiver is used as the this value when evaluating the code.
+[[Set]] | (propertyKey, value, Receiver) → Boolean | Set the value of the property whose key is propertyKey to value. If any ECMAScript code must be executed to set the property value, Receiver is used as the this value when evaluating the code. Returns true if the property value was set or false if it could not be set.
+[[Delete]] | (propertyKey) → Boolean | Remove the own property whose key is propertyKey from this object. Return false if the property was not deleted and is still present. Return true if the property was deleted or is not present.
+[[OwnPropertyKeys]] | ( ) → List of property keys | Return a List whose elements are all of the own property keys for the object.
+
+除此之外，还有两个额外的必要内部方法。在 JavaScript 中，函数也是对象，通过内部方法和内部槽可以区分对象是否为函数。
+
+Internal Method|Signature|Description
+|-|-|-|
+[[Call]] | (any, a List of any) → any | Executes code associated with this object. Invoked via a function call expression. The arguments to the internal method are a this value and a List whose elements are the arguments passed to the function by a call expression. Objects that implement this internal method are callable.
+[[Construct]] | (a List of any, Object) → Object | Creates an object. Invoked via the new operator or a super call. The first argument to the internal method is a List whose elements are the arguments of the constructor invocation or the super call. The second argument is the object to which the new operator was initially applied. Objects that implement this internal method are called constructors. A function object is not necessarily a constructor and such non-constructor function objects do not have a [[Construct]] internal method.
+
+回到一开始的问题，如果一个对象按以上规范去实现内部方法，即为 `常规对象`，否则为 `异质对象`。
+
+`Proxy` 就是一个 `异质对象`。当访问一个代理对象的属性时
+
+```js
+const proxyObject = new Proxy(obj, { /** */ })
+proxyObject.foo
+```
+
+实际上是调用 `proxyObject` 中的 `[[Get]]` 方法，如果 `proxyObject` 没有指定 `get()` 拦截函数，则会调用原始对象 `obj` 的内部方法 `[[Get]]`，即代理透明性质。
+
+因此，当代理对象指定一个拦截函数时，并不是修改了原始对象(被代理的 obj)的内部方法和行为，而是自定义了自己(代理对象 proxyObject)的内部方法和行为。以下是 Proxy 对象部署的所有内部方法以及用来自定义内部方法和行为的拦截函数名称。
+
+内部方法|处理器函数
+|-|-|
+[[GetPrototypeOf]] | getPrototypeOf
+[[SetPrototypeOf]] | setPrototypeOf
+[[IsExtensible]] | isExtensible
+[[PreventExtensions]] | preventExtensions
+[[GetOwnProperty]] | getOwnPropertyDescriptor
+[[DefineOwnProperty]] | defineProperty
+[[HasProperty]] | has
+[[Get]] | get
+[[Set]] | set
+[[Delete]] | deleteProperty
+[[OwnPropertyKeys]] | ownKeys
+[[Call]] | apply
+[[Construct]] | constructor
+
+例如我们需要拦截删除属性操作
+
+```js
+const obj = { foo: 1 }
+const proxyObject = new Proxy(obj, {
+    deleteProperty(target, key) {
+        return Reflect.deleteProperty(target, key) // 调用 Reflect 上的同名方法实现操作
+    }
+})
+
+console.log(obj.foo) // 1
+delete obj.foo
+console.log(obj.foo) // undefined
+```
