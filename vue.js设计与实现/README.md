@@ -803,7 +803,7 @@ function traverse(data, seen = new Set()) {
     for(const key in data) {
         traverse(data[key], seen)
     }
-    return value
+    return data
 }
 ```
 
