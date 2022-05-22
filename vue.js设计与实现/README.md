@@ -1189,3 +1189,162 @@ console.log(obj.foo) // 1
 delete obj.foo
 console.log(obj.foo) // undefined
 ```
+
+### 如何代理 Object
+
+读取是一个很宽泛的概念，以下所有操作都是对一个对象的读取：
+
+1. 访问属性：foo.bar
+2. 判断对象或原型上是否存在给定的 key：key in obj
+3. 使用 for...in 循环遍历对象：for (const key in obj) {}
+
+#### 拦截 in
+
+对于 `in` 操作符应该如何拦截？在ECMA-262规范中明确定义了 `in` 操作符的运行时逻辑：
+
+>RelationalExpression : RelationalExpression in ShiftExpression
+>1. Let lref be the result of evaluating RelationalExpression.
+>2. Let lval be ? GetValue(lref).
+>3. Let rref be the result of evaluating ShiftExpression.
+>4. Let rval be ? GetValue(rref).
+>5. If Type(rval) is not Object, throw a TypeError exception.
+>6. Return ? HasProperty(rval, ? ToPropertyKey(lval)).
+
+看到第6点可以知道，in 的运算结果最后是通过调用一个 `HasProperty` 的抽象方法得到的。通过ECMA-262 7.3.11节找到：`HasProperty` 抽象方法其实就是调用内部方法 `[[HasProperty]]`，而它对应的拦截器函数为 `has`。因此：
+
+```js
+const obj = { foo: 1 }
+
+const proxyObj = new Proxy(obj, {
+    has (target, key) {
+        track(target, key) // done
+        return Reflect.has(target, key)
+    }
+})
+
+effect(() => {
+    'foo' in proxyObj // 将会建立依赖关系
+})
+```
+
+#### 拦截 for...in
+
+同样通过查阅 ECMA-262 14.7.5.6 节得到，for...in的运行时逻辑中，6-c 步骤调用了一个 `EnumerateObjectProperties` 的抽象方法：
+
+>6. If iterationKind is enumerate then  
+>...  
+>c. Let iterator be ? EnumerateObjectProperties(obj)  
+>...
+
+规范 14.7.5.9 节中给出 `EnumerateObjectProperties` 的示例实现，代码中使用了 `Reflect.ownKeys(obj)` 来获取只属于对象自身拥有的键，因此，我们使用同名的 `ownKeys` 拦截函数就可以拦截到 `for...in` 操作：
+
+```js
+const obj = { foo: 1 }
+const ITERATE_KEY = Symbol()
+
+const proxyObj = new Proxy(obj, {
+    ownKeys(target) {
+        track(target, ITERATE_KEY) // 现在 for...in 会建立联系
+        return Reflect.ownKeys(target)
+    }
+})
+```
+
+`ownKeys` 不接收具体的 key，所以我们需要手动指定一个 `ITERATE_KEY` 来确保 key 的依赖被正确追踪，因此在做 set 操作的时候也应该确保 `ITERATE_KEY` 对应的副作用函数被重新执行
+
+```js
+const obj = { foo: 1 }
+const proxyObj = new Proxy(obj, {
+  // do something
+})
+
+effect(() => {
+  for (const key in proxyObj) {
+    console.log('key: ', key)
+  }
+})
+
+proxyObj.bar = 2 // 需要触发 ITERATE_KEY 对应依赖
+```
+
+```js
+function trigger(target, key) {
+  // ...
+  
+  const iterateEffects = depsMap.get(ITERATE_KEY)
+  iterateEffects && iterateEffects.forEach(effectFn => {
+    if (effectFn !== activeEffect) {
+      effectsToRun.add(effectFn)
+    }
+  })
+
+  // ...
+}
+```
+
+在 trigger 的时候同时把 `ITERATE_KEY` 相关的副作用函数取出来重新执行。但这样会导致一个问题，那就是修改属性的时候也会触发，而修改属性并不修改 for...in 次数，是不应该触发的。因此我们应该标记此次 set 对应的是新增属性还是修改属性操作
+
+```js
+set(target, key, newVal, receiver) {
+  // 如果属性不存在，则说明是在添加新的属性，否则是设置已存在的属性
+  const type = Object.prototype.hasOwnProperty.call(target, key) ? 'SET' : 'ADD'
+  // 设置属性值
+  const res = Reflect.set(target, key, newVal, receiver)
+  // 将 type 作为第三个参数传递给 trigger 函数
+  trigger(target, key, type)
+
+  return res
+}
+```
+
+```js
+function trigger(target, key, type) {
+  // ...
+  
+  const iterateEffects = depsMap.get(ITERATE_KEY)
+  if (type === 'ADD') {
+    iterateEffects && iterateEffects.forEach(effectFn => {
+      if (effectFn !== activeEffect) {
+        effectsToRun.add(effectFn)
+      }
+    })
+  }
+
+  // ...
+}
+```
+
+同理，删除属性的时候会减少 for...in 次数，也应该重新执行 `ITERATE_KEY` 相关的副作用函数。
+
+```js
+deleteProperty(target, key) {
+  // 检查被操作的属性是否是对象自己的属性
+  const hadKey = Object.prototype.hasOwnProperty.call(target, key)
+  // 使用 Reflect.deleteProperty 完成属性的删除
+  const res = Reflect.deleteProperty(target, key)
+
+  if (res && hadKey) {
+    // 只有当被删除的属性时对象自己的属性并且成功删除时，才触发更新
+    trigger(target, key, 'DELETE')
+  }
+
+  return res
+}
+```
+
+```js
+function trigger(target, key, type) {
+  // ...
+  
+  const iterateEffects = depsMap.get(ITERATE_KEY)
+  if (type === 'ADD' || type === 'DELETE') {
+    iterateEffects && iterateEffects.forEach(effectFn => {
+      if (effectFn !== activeEffect) {
+        effectsToRun.add(effectFn)
+      }
+    })
+  }
+
+  // ...
+}
+```
