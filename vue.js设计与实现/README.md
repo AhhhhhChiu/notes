@@ -270,7 +270,7 @@ const bucket = new WeakMap()
 const track = (target, key) => {
     // 同样的 没有副作用函数直接不玩
     if (activeEffect) return 
-    const depsMap = bucket.get(target)
+    let depsMap = bucket.get(target)
     if (!depsMap) {
         bucket.set(target, (depsMap = new Map()))
     }
@@ -328,7 +328,7 @@ bucket使用WeakMap的原因是因为它对key是弱引用，并不会影响垃�
 
 ```js
 const data = { ok: true, text: 'qnyd' }
-const proxyData = new Proxy(data, { /*...*/ })
+const obj = new Proxy(data, { /*...*/ })
 
 effect(() => {
     document.body.innerText = obj.ok ? obj.text : 'not'
@@ -342,6 +342,12 @@ obj.ok = false
 ```
 
 且同时obj.text不会被读取，我们希望修改obj.text时副作用函数不被重新执行，但事实上是会的
+
+```js
+// 如果执行
+obj.text = 'qnyd!'
+// 会重新执行 effect
+```
 
 解决的思路是这样，因为每次执行副作用函数时，都会往桶子里收集依赖，但在这次新的收集过程中是不会包括没用的依赖的，举个栗子，第二次修改ok的值时
 
