@@ -269,7 +269,7 @@ obj.notExist = 'abc'
 const bucket = new WeakMap()
 const track = (target, key) => {
     // 同样的 没有副作用函数直接不玩
-    if (activeEffect) return 
+    if (!activeEffect) return 
     let depsMap = bucket.get(target)
     if (!depsMap) {
         bucket.set(target, (depsMap = new Map()))
