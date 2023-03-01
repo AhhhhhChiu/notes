@@ -1,3 +1,10 @@
+// 注册副作用函数
+let activeEffect
+const effect = (fn) => {
+  activeEffect = fn
+  fn()
+}
+
 // 收集依赖的桶
 const bucket = new Set()
 
@@ -5,7 +12,7 @@ const bucket = new Set()
 const proxy = (data) => new Proxy(data, {
   get(target, key) {
     console.log('get', key)
-    bucket.add(effect) // 读取属性时收集依赖
+    activeEffect && bucket.add(activeEffect) // 读取属性时收集依赖
     return target[key]
   },
   set(target, key, newVal) {
@@ -18,9 +25,9 @@ const proxy = (data) => new Proxy(data, {
 
 // 使用
 const obj = proxy({ foo: 1 })
-const effect = () => {
+effect(() => {
   console.log('effect')
-}
+})
 
 obj.foo
 obj.foo = 2
