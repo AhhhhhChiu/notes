@@ -1,10 +1,25 @@
 /**
+ * 清除引用关系
+ */
+const cleanup = (effectFn) => {
+  effectFn.deps?.forEach((deps) => {
+    deps.delete(effectFn)
+  })
+  effectFn.deps.length = 0
+}
+
+/**
  * 注册副作用函数
  */
 let activeEffect
 const effect = (fn) => {
-  activeEffect = fn
-  fn()
+  const effectFn = () => {
+    cleanup(effectFn)
+    activeEffect = effectFn
+    fn()
+  }
+  effectFn.deps = []
+  effectFn()
 }
 
 /**
@@ -19,6 +34,7 @@ const track = (target, key) => {
   let deps = depsMap.get(key)
   if (!deps) depsMap.set(key, (deps = new Set()))
   deps.add(activeEffect)
+  activeEffect.deps.push(deps)
 }
 
 /**
@@ -29,7 +45,8 @@ const trigger = (target, key) => {
   const depsMap = bucket.get(target)
   if (!depsMap) return
   const deps = depsMap.get(key)
-  deps && deps.forEach((fn) => fn())
+  const effectsToRun = new Set(deps)
+  effectsToRun.forEach((fn) => fn())
 }
 
 /**
@@ -49,10 +66,10 @@ const proxy = (data) => new Proxy(data, {
 /**
  * 使用
  */
-const obj = proxy({ foo: 1 })
+const obj = proxy({ ok: true, text: 'qnyd' })
 effect(() => {
-  console.log('effect')
+  console.log('effect: ', obj.ok ? obj.text : 123)
 })
-
-obj.foo
-obj.foo = 2
+obj.ok = false
+console.log('-----------------')
+obj.text = 'qnyd!'
