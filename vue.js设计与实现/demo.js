@@ -49,7 +49,12 @@ const trigger = (target, key) => {
   const depsMap = bucket.get(target)
   if (!depsMap) return
   const deps = depsMap.get(key)
-  const effectsToRun = new Set(deps)
+  const effectsToRun = new Set()
+  deps && deps.forEach((fn) => {
+    if (fn !== activeEffect) {
+      effectsToRun.add(fn)
+    }
+  })
   effectsToRun.forEach((fn) => fn())
 }
 
@@ -70,17 +75,5 @@ const proxy = (data) => new Proxy(data, {
 /**
  * 使用
  */
-const proxyData = proxy({ foo: true, bar: true })
-let temp
-effect(() => {
-    console.log('外层执行')
-    effect(() => {
-        console.log('里层执行')
-        temp = proxyData.foo
-    })
-    temp = proxyData.bar
-})
-
-setTimeout(() => {
-    proxyData.bar = false
-}, 1000)
+ const proxyData = proxy({ foo: 1 })
+ effect(() => proxyData.foo++) // 爆栈
