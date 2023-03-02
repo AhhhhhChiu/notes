@@ -13,7 +13,7 @@ const cleanup = (effectFn) => {
  */
 const effectStack = []
 let activeEffect
-const effect = (fn) => {
+const effect = (fn, options = {}) => {
   const effectFn = () => {
     cleanup(effectFn)
     activeEffect = effectFn
@@ -22,6 +22,7 @@ const effect = (fn) => {
     effectStack.pop()
     activeEffect = effectStack[effectStack.length - 1]
   }
+  effectFn.options = options
   effectFn.deps = []
   effectFn()
 }
@@ -55,7 +56,13 @@ const trigger = (target, key) => {
       effectsToRun.add(fn)
     }
   })
-  effectsToRun.forEach((fn) => fn())
+  effectsToRun.forEach((fn) => {
+    if (fn.options.scheduler) {
+      fn.options.scheduler(fn)
+    } else {
+      fn()
+    }
+  })
 }
 
 /**
@@ -75,5 +82,13 @@ const proxy = (data) => new Proxy(data, {
 /**
  * 使用
  */
- const proxyData = proxy({ foo: 1 })
- effect(() => proxyData.foo++) // 爆栈
+const obj = proxy( { foo: 1 })
+effect(() => {
+  console.log(obj.foo)
+}, {
+  scheduler(fn) {
+    setTimeout(fn)
+  }
+})
+obj.foo++
+console.log('结束了')
