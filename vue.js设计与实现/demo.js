@@ -11,12 +11,16 @@ const cleanup = (effectFn) => {
 /**
  * 注册副作用函数
  */
+const effectStack = []
 let activeEffect
 const effect = (fn) => {
   const effectFn = () => {
     cleanup(effectFn)
     activeEffect = effectFn
+    effectStack.push(activeEffect)
     fn()
+    effectStack.pop()
+    activeEffect = effectStack[effectStack.length - 1]
   }
   effectFn.deps = []
   effectFn()
@@ -66,10 +70,17 @@ const proxy = (data) => new Proxy(data, {
 /**
  * 使用
  */
-const obj = proxy({ ok: true, text: 'qnyd' })
+const proxyData = proxy({ foo: true, bar: true })
+let temp
 effect(() => {
-  console.log('effect: ', obj.ok ? obj.text : 123)
+    console.log('外层执行')
+    effect(() => {
+        console.log('里层执行')
+        temp = proxyData.foo
+    })
+    temp = proxyData.bar
 })
-obj.ok = false
-console.log('-----------------')
-obj.text = 'qnyd!'
+
+setTimeout(() => {
+    proxyData.bar = false
+}, 1000)
