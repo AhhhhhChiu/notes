@@ -122,12 +122,15 @@ const traverse = (data, seen = new Set()) => {
   return data
 }
 const watch = (data, callback) => {
+  let oldVal
   const getter = typeof data === 'function'
     ? data
     : () => traverse(data)
-  effect(getter, {
+  const effectFn = effect(getter, {
     scheduler() {
-      callback()
+      const newVal = effectFn()
+      callback(newVal, oldVal)
+      oldVal = newVal
     }
   })
 }
@@ -137,10 +140,14 @@ const watch = (data, callback) => {
  * 使用
  */
 const proxyData = proxy({ foo: 1, bar: 2 })
-watch(proxyData, () => {
-  console.log('change')
+watch(() => proxyData.foo, (newVal, oldVal) => {
+  console.log(`${oldVal} => ${newVal}`)
 })
 
 setTimeout(() => {
   proxyData.foo = 2
+  setTimeout(() => {
+    proxyData.foo = 1
+  }, 1000)
 }, 1000)
+
