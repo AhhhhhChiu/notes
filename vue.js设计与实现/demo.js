@@ -24,7 +24,10 @@ const effect = (fn, options = {}) => {
   }
   effectFn.options = options
   effectFn.deps = []
-  effectFn()
+  if (!options.lazy) {
+    effectFn()
+  }
+  return effectFn
 }
 
 /**
@@ -82,13 +85,14 @@ const proxy = (data) => new Proxy(data, {
 /**
  * 使用
  */
-const obj = proxy( { foo: 1 })
-effect(() => {
-  console.log(obj.foo)
-}, {
-  scheduler(fn) {
-    setTimeout(fn)
-  }
-})
-obj.foo++
-console.log('结束了')
+const obj = proxy({ foo: 1 })
+const effectFn = effect(
+  () => {
+    console.log(obj.foo)
+  },
+  { lazy: true }
+)
+
+setTimeout(() => {
+  effectFn()
+}, 1000)
