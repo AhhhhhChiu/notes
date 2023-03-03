@@ -18,9 +18,10 @@ const effect = (fn, options = {}) => {
     cleanup(effectFn)
     activeEffect = effectFn
     effectStack.push(activeEffect)
-    fn()
+    const res = fn()
     effectStack.pop()
     activeEffect = effectStack[effectStack.length - 1]
+    return res
   }
   effectFn.options = options
   effectFn.deps = []
@@ -83,16 +84,31 @@ const proxy = (data) => new Proxy(data, {
 })
 
 /**
+ * computed 封装
+ */
+const computed = (getter) => {
+  let value
+  let dirty = true
+  const effectFn = effect(getter, {
+    lazy: true,
+    scheduler() {
+      dirty = true
+    }
+  })
+  return {
+    get value() {
+      if (dirty) {
+        value = effectFn()
+        dirty = false
+      }
+      return value
+    }
+  }
+}
+
+/**
  * 使用
  */
-const obj = proxy({ foo: 1 })
-const effectFn = effect(
-  () => {
-    console.log(obj.foo)
-  },
-  { lazy: true }
-)
-
-setTimeout(() => {
-  effectFn()
-}, 1000)
+const proxyData = proxy({ foo: 1, bar: 2 })
+const sum = computed(() => proxyData.foo + proxyData.bar)
+console.log(sum.value)
