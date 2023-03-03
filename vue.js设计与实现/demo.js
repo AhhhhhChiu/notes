@@ -111,12 +111,36 @@ const computed = (getter) => {
 }
 
 /**
+ * watch 封装
+ */
+const traverse = (data, seen = new Set()) => {
+  if (typeof data !== 'object' || data === null || seen.has(data)) return
+  seen.add(data)
+  for (const key in data) {
+    traverse(data[key], seen)
+  }
+  return data
+}
+const watch = (data, callback) => {
+  const getter = typeof data === 'function'
+    ? data
+    : () => traverse(data)
+  effect(getter, {
+    scheduler() {
+      callback()
+    }
+  })
+}
+
+
+/**
  * 使用
  */
 const proxyData = proxy({ foo: 1, bar: 2 })
-const sum = computed(() => proxyData.foo + proxyData.bar)
-// effect computed
-effect(() => {
-  console.log(sum.value)
+watch(proxyData, () => {
+  console.log('change')
 })
-proxyData.foo++
+
+setTimeout(() => {
+  proxyData.foo = 2
+}, 1000)
