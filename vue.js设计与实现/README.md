@@ -853,7 +853,6 @@ function watch(data, cb) {
             }
         }
     )
-    // 手动调用拿到旧值 但感觉直接 effectFn() 就可以了 不明白为什么要赋给 oldVal
     oldVal = effectFn()
 }
 ```
