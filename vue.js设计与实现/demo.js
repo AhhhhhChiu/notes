@@ -73,9 +73,9 @@ const trigger = (target, key) => {
  * 代理
  */
 const proxy = (data) => new Proxy(data, {
-  get(target, key) {
+  get(target, key, receiver) {
     track(target, key) // 读取属性时收集依赖
-    return target[key]
+    return Reflect.get(target, key, receiver)
   },
   set(target, key, newVal) {
     target[key] = newVal
@@ -146,23 +146,14 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
-const sleep = (sleepTime = 1000) => new Promise(
-  (resolve) => {
-    setTimeout(() => {
-      resolve(`sleep - ${sleepTime}`)
-    }, sleepTime)
+const data = {
+  foo: 1,
+  get bar() {
+    return this.foo
   }
-)
-const proxyData = proxy({ timeout: 1 })
-watch(proxyData, async (_, __, onInvalidate) => {
-  let expired = false
-  onInvalidate(() => {
-    expired = true
-  })
-  const data = await sleep(proxyData.timeout)
-  if (!expired) {
-    console.log(data)
-  }
+}
+const proxyData = proxy(data)
+effect(() => {
+  console.log(proxyData.bar)
 })
-proxyData.timeout = 2000
-proxyData.timeout = 1000
+proxyData.foo ++
