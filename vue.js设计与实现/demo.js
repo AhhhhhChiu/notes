@@ -123,33 +123,46 @@ const traverse = (data, seen = new Set()) => {
 }
 const watch = (data, callback, options) => {
   let oldVal
+  let _cleanup
+  const onInvalidate = (fn) => {
+    _cleanup = fn
+  }
   const getter = typeof data === 'function'
     ? data
     : () => traverse(data)
   const job = () => {
     const newVal = effectFn()
-    callback(newVal, oldVal)
+    _cleanup?.()
+    callback(newVal, oldVal, onInvalidate)
     oldVal = newVal
   }
   const effectFn = effect(getter, {
     scheduler: job
   })
-  options.immediate && job()
+  options?.immediate && job()
 }
 
 
 /**
  * 使用
  */
-const proxyData = proxy({ foo: 1, bar: 2 })
-watch(() => proxyData.foo, (newVal, oldVal) => {
-  console.log(`${oldVal} => ${newVal}`)
-}, { immediate: true })
-
-setTimeout(() => {
-  proxyData.foo = 2
-  setTimeout(() => {
-    proxyData.foo = 1
-  }, 1000)
-}, 1000)
-
+const sleep = (sleepTime = 1000) => new Promise(
+  (resolve) => {
+    setTimeout(() => {
+      resolve(`sleep - ${sleepTime}`)
+    }, sleepTime)
+  }
+)
+const proxyData = proxy({ timeout: 1 })
+watch(proxyData, async (_, __, onInvalidate) => {
+  let expired = false
+  onInvalidate(() => {
+    expired = true
+  })
+  const data = await sleep(proxyData.timeout)
+  if (!expired) {
+    console.log(data)
+  }
+})
+proxyData.timeout = 2000
+proxyData.timeout = 1000
