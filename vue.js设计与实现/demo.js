@@ -121,18 +121,20 @@ const traverse = (data, seen = new Set()) => {
   }
   return data
 }
-const watch = (data, callback) => {
+const watch = (data, callback, options) => {
   let oldVal
   const getter = typeof data === 'function'
     ? data
     : () => traverse(data)
+  const job = () => {
+    const newVal = effectFn()
+    callback(newVal, oldVal)
+    oldVal = newVal
+  }
   const effectFn = effect(getter, {
-    scheduler() {
-      const newVal = effectFn()
-      callback(newVal, oldVal)
-      oldVal = newVal
-    }
+    scheduler: job
   })
+  options.immediate && job()
 }
 
 
@@ -142,7 +144,7 @@ const watch = (data, callback) => {
 const proxyData = proxy({ foo: 1, bar: 2 })
 watch(() => proxyData.foo, (newVal, oldVal) => {
   console.log(`${oldVal} => ${newVal}`)
-})
+}, { immediate: true })
 
 setTimeout(() => {
   proxyData.foo = 2
