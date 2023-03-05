@@ -32,6 +32,12 @@ const effect = (fn, options = {}) => {
 }
 
 /**
+ * ownKeys 用来收集依赖的键
+ */
+const ITERATE_KEY = Symbol()
+
+
+/**
  * 收集依赖
  */
 const bucket = new WeakMap()
@@ -49,7 +55,11 @@ const track = (target, key) => {
 /**
  * 触发依赖执行
  */
-const trigger = (target, key) => {
+const TriggerType = {
+  SET: 1,
+  ADD: 2
+}
+const trigger = (target, key, type) => {
   console.log('trigger', key)
   const depsMap = bucket.get(target)
   if (!depsMap) return
@@ -60,6 +70,14 @@ const trigger = (target, key) => {
       effectsToRun.add(fn)
     }
   })
+  if (type === TriggerType.ADD) {
+    const iterateEffects = depsMap.get(ITERATE_KEY)
+    iterateEffects && iterateEffects.forEach((fn) => {
+      if (fn !== activeEffect) {
+        effectsToRun.add(fn)
+      }
+    })
+  }
   effectsToRun.forEach((fn) => {
     if (fn.options.scheduler) {
       fn.options.scheduler(fn)
@@ -78,13 +96,18 @@ const proxy = (data) => new Proxy(data, {
     return Reflect.get(target, key, receiver)
   },
   set(target, key, newVal, receiver) {
+    const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
     const res = Reflect.set(target, key, newVal, receiver)
-    trigger(target, key) // 写入属性时触发依赖执行
+    trigger(target, key, type) // 写入属性时触发依赖执行
     return res
   },
   has(target, key, receiver) { // 拦截 in 读取
     track(target, key)
     return Reflect.has(target, key, receiver)
+  },
+  ownKeys(target) { // 拦截 for...in
+    track(target, ITERATE_KEY)
+    return Reflect.ownKeys(target)
   }
 })
 
@@ -151,7 +174,11 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
-const proxyData = proxy({ foo: 1, bar: 2 })
+const proxyData = proxy({ foo: 1 })
 effect(() => {
-  'foo' in proxyData
+  for (const key in proxyData) {
+    console.log('key: ', key)
+  }
 })
+proxyData.bar = 2 // 添加新属性，对 for...in 有影响，需要重新执行副作用函数
+proxyData.foo = 1 // 修改旧属性，对 for...in 无影响，不需要重新执行副作用函数
