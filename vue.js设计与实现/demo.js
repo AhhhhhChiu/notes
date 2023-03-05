@@ -57,7 +57,8 @@ const track = (target, key) => {
  */
 const TriggerType = {
   SET: 1,
-  ADD: 2
+  ADD: 2,
+  DELETE: 3
 }
 const trigger = (target, key, type) => {
   console.log('trigger', key)
@@ -70,7 +71,7 @@ const trigger = (target, key, type) => {
       effectsToRun.add(fn)
     }
   })
-  if (type === TriggerType.ADD) {
+  if (type === TriggerType.ADD || type === TriggerType.DELETE) {
     const iterateEffects = depsMap.get(ITERATE_KEY)
     iterateEffects && iterateEffects.forEach((fn) => {
       if (fn !== activeEffect) {
@@ -108,6 +109,14 @@ const proxy = (data) => new Proxy(data, {
   ownKeys(target) { // 拦截 for...in
     track(target, ITERATE_KEY)
     return Reflect.ownKeys(target)
+  },
+  deleteProperty(target, key) {
+    const hadKey = Object.prototype.hasOwnProperty.call(target, key)
+    const res = Reflect.deleteProperty(target, key)
+    if (hadKey && res) {
+      trigger(target, key, TriggerType.DELETE)
+    }
+    return res
   }
 })
 
@@ -176,9 +185,6 @@ const watch = (data, callback, options) => {
  */
 const proxyData = proxy({ foo: 1 })
 effect(() => {
-  for (const key in proxyData) {
-    console.log('key: ', key)
-  }
+  console.log(proxyData.foo)
 })
-proxyData.bar = 2 // 添加新属性，对 for...in 有影响，需要重新执行副作用函数
-proxyData.foo = 1 // 修改旧属性，对 for...in 无影响，不需要重新执行副作用函数
+delete proxyData.foo
