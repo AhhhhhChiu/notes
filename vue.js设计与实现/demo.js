@@ -77,9 +77,14 @@ const proxy = (data) => new Proxy(data, {
     track(target, key) // 读取属性时收集依赖
     return Reflect.get(target, key, receiver)
   },
-  set(target, key, newVal) {
-    target[key] = newVal
+  set(target, key, newVal, receiver) {
+    const res = Reflect.set(target, key, newVal, receiver)
     trigger(target, key) // 写入属性时触发依赖执行
+    return res
+  },
+  has(target, key, receiver) { // 拦截 in 读取
+    track(target, key)
+    return Reflect.has(target, key, receiver)
   }
 })
 
@@ -146,14 +151,7 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
-const data = {
-  foo: 1,
-  get bar() {
-    return this.foo
-  }
-}
-const proxyData = proxy(data)
+const proxyData = proxy({ foo: 1, bar: 2 })
 effect(() => {
-  console.log(proxyData.bar)
+  'foo' in proxyData
 })
-proxyData.foo ++
