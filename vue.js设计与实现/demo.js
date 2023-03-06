@@ -91,8 +91,11 @@ const trigger = (target, key, type) => {
 /**
  * 代理
  */
-const proxy = (data) => new Proxy(data, {
+const reactive = (data) => new Proxy(data, {
   get(target, key, receiver) {
+    if (key === 'raw') {
+      return target
+    }
     track(target, key) // 读取属性时收集依赖
     return Reflect.get(target, key, receiver)
   },
@@ -100,8 +103,10 @@ const proxy = (data) => new Proxy(data, {
     const oldVal = target[key]
     const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
     const res = Reflect.set(target, key, newVal, receiver)
-    if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) { // 新值不等于旧值并且排除重复设置NaN的情况
-      trigger(target, key, type) // 写入属性时触发依赖执行
+    if (target === receiver.raw) {
+      if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) { // 新值不等于旧值并且排除重复设置NaN的情况
+        trigger(target, key, type) // 写入属性时触发依赖执行
+      }
     }
     return res
   },
@@ -186,10 +191,11 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
-const proxyData = proxy({ foo: NaN, bar: 1 })
+const parent = reactive({ foo: 1 })
+const child = reactive({})
+Object.setPrototypeOf(child, parent)
 effect(() => {
-  console.log(proxyData.foo)
-  console.log(proxyData.bar)
+  console.log(child.foo)
 })
-proxyData.foo = NaN
-proxyData.bar = 1
+console.log('---')
+child.foo = 2
