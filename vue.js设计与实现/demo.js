@@ -97,9 +97,12 @@ const proxy = (data) => new Proxy(data, {
     return Reflect.get(target, key, receiver)
   },
   set(target, key, newVal, receiver) {
+    const oldVal = target[key]
     const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
     const res = Reflect.set(target, key, newVal, receiver)
-    trigger(target, key, type) // 写入属性时触发依赖执行
+    if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) { // 新值不等于旧值并且排除重复设置NaN的情况
+      trigger(target, key, type) // 写入属性时触发依赖执行
+    }
     return res
   },
   has(target, key, receiver) { // 拦截 in 读取
@@ -183,8 +186,10 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
-const proxyData = proxy({ foo: 1 })
+const proxyData = proxy({ foo: NaN, bar: 1 })
 effect(() => {
   console.log(proxyData.foo)
+  console.log(proxyData.bar)
 })
-delete proxyData.foo
+proxyData.foo = NaN
+proxyData.bar = 1
