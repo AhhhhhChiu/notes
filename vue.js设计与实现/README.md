@@ -1456,3 +1456,44 @@ const reactive = (obj) => new Proxy(obj, {
   // ...
 })
 ```
+
+### 浅响应与深响应
+
+我们现在实现的 `reactive` 是浅响应
+
+```js
+const obj = reactive({ foo: { bar: 1 } })
+effect(() => {
+  console.log(obj.foo.bar)
+})
+// 修改 obj.foo.bar 的值，并不能触发响应
+obj.foo.bar = 2
+```
+
+我们需要改造一下，封装 `shallowReactive` 和 `reactive`，让我们的系统同时支持浅响应与深响应
+
+```js
+// 封装两个新函数
+const reactive = (obj) => createReactive(obj)
+const shallowReactive = (obj) => createReactive(obj, true)
+
+// 原先的 reactive 改名为 createReactive，新增 isShallow 参数区别是否为浅响应
+function createReactive(obj, isShallow) {
+  return new Proxy(obj, {
+    get(target, key, receiver) {
+      if (key === 'raw') {
+        return target
+      }
+      const res = Reflect.get(target, key, receiver)
+      track(target, key)
+      if (isShallow) {
+        return res // 如果是浅响应则直接返回结果
+      }
+      if (typeof res === 'object' && res !== null) {
+        return reactive(res) // 如果是深响应且结果为对象 则返回包装对象
+      }
+      return res
+    },
+  })
+}
+```

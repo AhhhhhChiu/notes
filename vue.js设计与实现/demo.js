@@ -91,13 +91,20 @@ const trigger = (target, key, type) => {
 /**
  * 代理
  */
-const reactive = (data) => new Proxy(data, {
+const createReactive = (data, isShallow) => new Proxy(data, {
   get(target, key, receiver) {
     if (key === 'raw') {
       return target
     }
+    const res = Reflect.get(target, key, receiver)
     track(target, key) // 读取属性时收集依赖
-    return Reflect.get(target, key, receiver)
+    if (isShallow) {
+      return res
+    }
+    if (typeof res === 'object' && res !== null) {
+      return reactive(res)
+    }
+    return res
   },
   set(target, key, newVal, receiver) {
     const oldVal = target[key]
@@ -127,6 +134,12 @@ const reactive = (data) => new Proxy(data, {
     return res
   }
 })
+
+/**
+ * 深响应和浅响应封装
+ */
+const reactive = (obj) => createReactive(obj)
+const shallowReactive = (obj) => createReactive(obj, true)
 
 /**
  * computed 封装
@@ -191,11 +204,13 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
-const parent = reactive({ foo: 1 })
-const child = reactive({})
-Object.setPrototypeOf(child, parent)
+const proxyData1 = reactive({ foo: { bar: 1 } })
+const proxyData2 = shallowReactive({ foo: { bar: 1 } })
 effect(() => {
-  console.log(child.foo)
+  proxyData1.foo.bar
+  proxyData2.foo.bar
+  console.log('effect')
 })
+proxyData1.foo.bar = 2 // 深响应 触发重新执行副作用函数
 console.log('---')
-child.foo = 2
+proxyData2.foo.bar = 2 // 浅响应 不触发重新执行副作用函数
