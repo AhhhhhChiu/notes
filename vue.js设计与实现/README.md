@@ -1353,3 +1353,106 @@ function trigger(target, key, type) {
   // ...
 }
 ```
+
+### 合理地触发响应
+
+当值没有发生变化时，应该不触发响应，因此我们判断此次 `set` 设置的值是否和旧值相同，相同则不触发
+
+```js
+const p = new Proxy(obj, {
+  set(target, key, newVal, receiver) {
+    // 先获取旧值
+    const oldVal = target[key]
+
+    const type = Object.prototype.hasOwnProperty.call(target, key) ? 'SET' : 'ADD'
+    const res = Reflect.set(target, key, newVal, receiver)
+    // 比较新值与旧值，当不全等、并且新旧值不都为NaN时候才触发响应
+    if (oldVal !== newVal && (oldVal === oldVal && newVal === newVal)) {
+      trigger(target, key, type)
+    }
+
+    return res
+  },
+})
+```
+
+此外，还有一种从原型上继承属性的情况
+
+```js
+// reactive 是对 new Proxy 的简单封装
+function reactive*(obj) => new Proxy(obj, { /** */ })
+
+const parent = reactive({ foo: 1 })
+const child = reactive({})
+Object.setPrototypeOf(child, parent)
+effect(() => {
+  console.log(child.foo)
+})
+child.foo = 2 // 会导致副作用函数重新执行两次
+```
+
+查看规范 10.1.8.1 节来了解 `[[Get]]` 内部方法的执行流程，其中有一步如下
+
+如果 desc 是 undefined，那么
+- a. 让 parent 的值为 ? O.[[GetPrototypeOf]]()。
+- b. 如果 parent 是 null，则返回 undefined。
+- c. 返回 ? parent.[[Get]](P, Receiver)。
+
+也就是说读取 `child` 的 `foo` 属性时，如果对象上不含该属性，则会获取对象的原型，然后调用原型的 `[[Get]]` 内部方法，即 `parent` 对象的 `[[Get]]`。但 `parent` 也是一个代理对象，所以会同时收集 `child` 和 `parent` 都会与副作用函数建立联系。
+
+同理，为 `child` 设置属性时，由于 `child` 上并不存在该属性，所以在 `Reflect.set(...)` 时会调用原型的 `[[Set]]` 方法，类似一个栈：
+
+```js
+child.[[Set]] => parent.[[Set]] => parent trigger => child trigger
+```
+
+解决的方式屏蔽掉其中一次副作用的执行。我们可以知道，
+1. 执行 `child` 的拦截函数 `set` 时，其中的 `target` 参数为 `child` 的原始对象，`receiver` 为 `child`
+2. 执行 `parent` 的拦截函数 `set` 时，其中的 `target` 参数为 `parent` 的原始对象，`receiver` 依然为 `child`
+因为我们是为 `child` 设置属性值，因此 `receiver` 总是为 `child`
+
+```js
+const originalChild = {}
+const child = new Proxy(originalChild, {
+  // target 为 originalChild
+  // receiver 为调用者即 child
+  set(target, key, newVal, receiver) {
+    // ...
+  }
+})
+
+const originalParent = {}
+const parent = new Proxy(originalParent, {
+  // target 为 originalParent
+  // receiver 为调用者即 child
+  set(target, key, newVal, receiver) {
+    // ...
+  }
+}) 
+```
+
+因此我们在 `set` 时判断 `receiver` 的原始对象是否为 `target`，是的时候再执行 `trigger`
+
+```js
+const reactive = (obj) => new Proxy(obj, {
+  get(target, key, receiver) {
+    if (key === 'raw') { // 约定.raw时是读取当前代理对象的原始对象
+      return target
+    }
+    track(target, key)
+    return Reflect.get(target, key, receiver)
+  },
+  set(target, key, newVal, receiver) {
+    const oldVal = target[key]
+    const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
+    const res = Reflect.set(target, key, newVal, receiver)
+    if (target === receiver.raw) { // 判断 target 和 receiver 的原始对象是否相同
+      if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
+        trigger(target, key, type)
+      }
+    }
+    return res
+  },
+  // ...
+})
+```
