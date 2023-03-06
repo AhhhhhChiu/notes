@@ -1497,3 +1497,55 @@ function createReactive(obj, isShallow) {
   })
 }
 ```
+
+### 只读和浅只读
+
+我们希望一些数据是只读的，当用户尝试修改只读数据时，会收到一条警告信息。同理有浅只读和深只读，这就是接下来要封装的 `shallowReadonly` 和 `readonly`
+
+
+```js
+// 封装两个新函数
+const readonly = (obj) => createReactive(obj, false, true)
+const shallowReadonly = (obj) => createReactive(obj, true, true)
+
+// 新增 isReadonly 参数区别是否为只读
+function createReactive(obj, isShallow, isReadonly) {
+  return new Proxy(obj, {
+    get(target, key, receiver) {
+      if (key === 'raw') {
+        return target
+      }
+      const res = Reflect.get(target, key, receiver)
+      // 只读属性的响应式是无意义的 因为只 track 那些非只读属性
+      if (!isReadonly) {
+          track(target, key)
+      }
+      if (isShallow) {
+        return res
+      }
+      if (typeof res === 'object' && res !== null) {
+        // 同样的 深只读需要递归所有子属性
+        return isReadonly ? readonly(res) : reactive(res)
+      }
+      return res
+    },
+    set(target, key, newVal, receiver) {
+      // 如果是只读的，打印警告信息并返回
+      if (isReadonly) {
+        console.warn(`属性${key}是只读的`)
+        return true
+      }
+      // ...
+    },
+    deleteProperty(target, key) {
+      // 如果是只读的，打印警告信息并返回
+      if (isReadonly) {
+        console.warn(`属性${key}是只读的`)
+        return true
+      }
+      // ...
+    },
+    // ...
+  })
+}
+```

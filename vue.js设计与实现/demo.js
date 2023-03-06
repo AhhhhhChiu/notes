@@ -91,22 +91,28 @@ const trigger = (target, key, type) => {
 /**
  * 代理
  */
-const createReactive = (data, isShallow) => new Proxy(data, {
+const createReactive = (data, isShallow, isReadonly) => new Proxy(data, {
   get(target, key, receiver) {
     if (key === 'raw') {
       return target
     }
     const res = Reflect.get(target, key, receiver)
-    track(target, key) // 读取属性时收集依赖
+    if (!isReadonly) {
+      track(target, key) // 读取属性时收集依赖
+    }
     if (isShallow) {
       return res
     }
     if (typeof res === 'object' && res !== null) {
-      return reactive(res)
+      return isReadonly ? readonly(res) : reactive(res)
     }
     return res
   },
   set(target, key, newVal, receiver) {
+    if (isReadonly) {
+      console.warn(`属性${key}是只读的`)
+      return true
+    }
     const oldVal = target[key]
     const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
     const res = Reflect.set(target, key, newVal, receiver)
@@ -126,6 +132,10 @@ const createReactive = (data, isShallow) => new Proxy(data, {
     return Reflect.ownKeys(target)
   },
   deleteProperty(target, key) {
+    if (isReadonly) {
+      console.warn(`属性${key}是只读的`)
+      return true
+    }
     const hadKey = Object.prototype.hasOwnProperty.call(target, key)
     const res = Reflect.deleteProperty(target, key)
     if (hadKey && res) {
@@ -140,6 +150,12 @@ const createReactive = (data, isShallow) => new Proxy(data, {
  */
 const reactive = (obj) => createReactive(obj)
 const shallowReactive = (obj) => createReactive(obj, true)
+
+/**
+ * 深只读和浅只读封装
+ */
+const readonly = (obj) => createReactive(obj, false, true)
+const shallowReadonly = (obj) => createReactive(obj, true, true)
 
 /**
  * computed 封装
@@ -204,13 +220,13 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
-const proxyData1 = reactive({ foo: { bar: 1 } })
-const proxyData2 = shallowReactive({ foo: { bar: 1 } })
+const proxyData1 = readonly({ foo: { bar: 1 } })
+const proxyData2 = shallowReadonly({ foo: { bar: 1 } })
 effect(() => {
   proxyData1.foo.bar
   proxyData2.foo.bar
   console.log('effect')
 })
-proxyData1.foo.bar = 2 // 深响应 触发重新执行副作用函数
+proxyData2.foo.bar = 2 // 浅只读 不打印警告信息
 console.log('---')
-proxyData2.foo.bar = 2 // 浅响应 不触发重新执行副作用函数
+proxyData1.foo.bar = 2 // 深只读 打印警告信息
