@@ -1804,3 +1804,43 @@ const reactive = (obj) => {
   return res
 }
 ```
+
+此时上面的示例代码可以正常运行，然而，还有以下这种情况：
+
+```js
+const obj = {}
+const arr = reactive([obj])
+
+console.log(arr.includes(obj))  // false
+```
+
+这个问题很好理解，`includes` 内部实现中的 `this` 指代的是代理对象 `arr`，而通过代理对象找 `obj` 这个原始对象是找不到的。要解决这个问题，我们需要重写 `includes` 方法
+
+我们知道，调用数组的 `includes` 方法其实是由两个基本语义组成的，一是访问数组对象上的 `incudes` 属性，二是执行函数。那我们只需要在拦截函数 `get` 中拦截并返回一个自定义的 `includes` 方法就可以实现对其重写的操作了 
+
+```js
+const arrayInstrumentations = {}
+;['includes', 'indexOf', 'lastIndexOf'].forEach((method) => { // indexOf 和 lastIndexOf 也需要做相同的操作 一并处理了
+  const originMethod = Array.prototype[method]
+  const arrayInstrumentations[method] = function(...args) {
+    let res = originMethod.apply(this, args)
+    // 如果代理对象中没有找到则通过原始对象查找
+    if (res === false) {
+      res = originMethod.apply(this.raw, args)
+    }
+    return res
+  }
+})
+
+// ...
+get(target, key, receiver) {
+  // ...
+  if (key === 'raw') {
+    return target
+  }
+  if (Array.isArray(target) && arrayInstrumentations.hasOwnProperty(key)) {
+    return Reflect.get(arrayInstrumentations, key, receiver)
+  }
+  // ...
+}
+```
