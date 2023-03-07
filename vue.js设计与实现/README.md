@@ -1549,3 +1549,111 @@ function createReactive(obj, isShallow, isReadonly) {
   })
 }
 ```
+
+### 代理数组
+
+在 JavaScript 中有两种对象：常规对象和异质对象。而数组就是一种异质对象，这是因为数组对象的 `[[DefineOwnProperty]]` 内部方法与常规对象不同，其余都相同。因此，在代理数组时，现在用于代理对象的大部分逻辑都可以适用。
+
+数组的读取操作如下：
+
+1. 通过索引访问数组元素值：arr[0]。
+2. 访问数组的长度：arr.length。
+3. 把数组作为对象，使用 for...in 循环遍历。
+4. 使用 for...of 迭代遍历数组。
+5. 数组的原型方法，如 concat/join/every/some/find/findIndex/includes 等，以及其他所有不改变原数组的原型方法。
+
+数组的设置操作如下：
+
+1. 通过索引修改数组元素值：arr[1] = 3。
+2. 修改数组长度：arr.length = 0。
+3. 数组的栈方法：push/pop/shift/unshift。
+4. 修改原数组的原型方法：splice/fill/sort 等。
+
+下面我们从数组的索引与 length 开始说起
+
+#### 数组的索引与 length
+
+通过索引设置数组的元素值与设置对象的属性值存在根本上的不同，查询规范的 10.4.2.1 节可知，如果设置的索引值大于数组当前的长度，那么要更新数组的length 属性。因此在触发响应时，也应该触发与 length 属性相关联的副作用函数重新执行。
+
+```js
+const arr = reactive(['foo']) // 数组的原长度为 1
+
+effect(() => {
+  console.log(arr.length) // 1
+})
+// 设置索引 1 的值，会导致数组的长度变为 2
+arr[1] = 'bar'
+```
+
+为了实现目标，我们需要修改 `set` 拦截函数
+
+```js
+set(target, key, newVal, receiver) {
+  const oldVal = target[key]
+  const type = Array.isArray(target)
+    ? Number(key) < target.length ? TriggerType.SET : TriggerType.ADD // 新增数组判断 set 类型判断
+    : Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
+  const res = Reflect.set(target, key, newVal, receiver)
+  if (target === receiver.raw) {
+    if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
+      trigger(target, key, type)
+    }
+  }
+  return res
+}
+```
+
+知道了数组当前 `set` 操作是新增子项还是设置原有子项后，我们就可以在 `trigger` 中选择是否触发 `length` 相关联的副作用函数了
+
+```js
+const trigger = (target, key, type) => {
+  // ...
+  if (type === TriggerType.ADD && Array.isArray(target)) {
+    const lengthEffects = depsMap.get('length')
+    lengthEffects && lengthEffects.forEach((fn) => {
+      if (fn !== activeEffect) {
+        effectsToRun.add(fn)
+      }
+    })
+  }
+  effectsToRun.forEach((fn) => {
+    // ...
+  })
+}
+```
+
+同理，修改数组的 `length` 属性也有可能影响部分数组元素，例如修改 `length` 为 100 时，并不会影响索引值为 2 的元素，但会影响索引值为 120 的元素。因此，我们需要找到那些索引值大于或等于新的 length 属性值的元素触发响应。
+
+```js
+set(target, key, newVal, receiver) {
+  // ...
+  if (target === receiver.raw) {
+    if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) {
+      trigger(target, key, type, newVal) // 新增第四个参数 触发响应的新值
+    }
+  }
+  return res
+}
+```
+
+trigger 中获取到新值之后就可以判断此次是否是对 `length` 的修改，以及是否需要触发重新执行副作用函数
+
+```js
+const trigger = (target, key, type, newVal) => {
+  // ...
+  if (Array.isArray(target) && key === 'length') {
+    depsMap.forEach((effects, index) => {
+      if (index >= newVal) { // 只有索引值大于等于新 length 的元素才需要触发响应
+        effects.forEach((fn) => {
+          if (fn !== activeEffect) {
+            effectsToRun.add(fn)
+          }
+        })
+      }
+    })
+  }
+  effectsToRun.forEach((fn) => {
+    // ...
+  })
+}
+```

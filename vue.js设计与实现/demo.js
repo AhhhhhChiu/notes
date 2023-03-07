@@ -60,7 +60,7 @@ const TriggerType = {
   ADD: 2,
   DELETE: 3
 }
-const trigger = (target, key, type) => {
+const trigger = (target, key, type, newVal) => {
   console.log('trigger', key)
   const depsMap = bucket.get(target)
   if (!depsMap) return
@@ -76,6 +76,25 @@ const trigger = (target, key, type) => {
     iterateEffects && iterateEffects.forEach((fn) => {
       if (fn !== activeEffect) {
         effectsToRun.add(fn)
+      }
+    })
+  }
+  if (type === TriggerType.ADD && Array.isArray(target)) { // 数组添加新元素时需要重新执行 length 关联的副作用函数
+    const lengthEffects = depsMap.get('length')
+    lengthEffects && lengthEffects.forEach((fn) => {
+      if (fn !== activeEffect) {
+        effectsToRun.add(fn)
+      }
+    })
+  }
+  if (key === 'length' && Array.isArray(target)) { // length 修改时有可能需要重新触发子项关联的副作用函数
+    depsMap.forEach((effects, index) => {
+      if (index >= newVal) { // 只有索引值大于等于新长度的子项才需要触发
+        effects.forEach((fn) => {
+          if (fn !== activeEffect) {
+            effectsToRun.add(fn)
+          }
+        })
       }
     })
   }
@@ -114,11 +133,13 @@ const createReactive = (data, isShallow, isReadonly) => new Proxy(data, {
       return true
     }
     const oldVal = target[key]
-    const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
+    const type = Array.isArray
+      ? Number(key) < target.length ? TriggerType.SET : TriggerType.ADD
+      : Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
     const res = Reflect.set(target, key, newVal, receiver)
     if (target === receiver.raw) {
       if (oldVal !== newVal && (oldVal === oldVal || newVal === newVal)) { // 新值不等于旧值并且排除重复设置NaN的情况
-        trigger(target, key, type) // 写入属性时触发依赖执行
+        trigger(target, key, type, newVal) // 写入属性时触发依赖执行
       }
     }
     return res
@@ -220,13 +241,17 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
-const proxyData1 = readonly({ foo: { bar: 1 } })
-const proxyData2 = shallowReadonly({ foo: { bar: 1 } })
+const arr = reactive(['foo']) // 数组的原长度为 1
+
 effect(() => {
-  proxyData1.foo.bar
-  proxyData2.foo.bar
-  console.log('effect')
+  console.log('length: ', arr.length) // 1
 })
-proxyData2.foo.bar = 2 // 浅只读 不打印警告信息
+// 设置索引 1 的值，会导致数组的长度变为 2
+arr[1] = 'bar'
+// -------------------------------------------------
 console.log('---')
-proxyData1.foo.bar = 2 // 深只读 打印警告信息
+// -------------------------------------------------
+effect(() => {
+  console.log('item: ', arr[0])
+})
+arr.length = 0
