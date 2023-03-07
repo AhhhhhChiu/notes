@@ -116,7 +116,7 @@ const createReactive = (data, isShallow, isReadonly) => new Proxy(data, {
       return target
     }
     const res = Reflect.get(target, key, receiver)
-    if (!isReadonly) {
+    if (!isReadonly && typeof key !== 'symbol') {
       track(target, key) // 读取属性时收集依赖
     }
     if (isShallow) {

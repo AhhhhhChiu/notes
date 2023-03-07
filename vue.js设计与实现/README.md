@@ -1681,4 +1681,73 @@ ownKeys(target) {
 }
 ```
 
+`for...of` 也可以用来遍历数组，与 `for...in` 不同，`for...of` 是用来遍历 `可迭代对象` 的。
 
+**ES2015** 为 **JavaScript** 定义了 `迭代协议（iteration protocol）`，其中规定了，一个对象是否能被迭代，取决于该对象的原型是否实现了 `@@iterator` 方法，即 `Symbol.iterator` 方法。
+
+```js
+// 实现了 Symbol.iterator 的对象
+const obj = {
+  val: 0,
+  [Symbol.iterator]() {
+    return {
+      next() {
+        return {
+          value: obj.val++,
+          done: obj.val > 10
+        }
+      }
+    }
+  }
+}
+
+for (const key of obj) {
+  console.log(key) // 0 1 2 3 4 5 6 7 8 9
+}
+```
+
+数组中内建了迭代器方法
+
+```js
+// 调用数组内建的迭代器方法
+const arr = [1, 2, 3]
+const iterator = arr[Symbol.iterator]()
+console.log(iterator.next()) // { value: 1, done: false }
+console.log(iterator.next()) // { value: 2, done: false }
+console.log(iterator.next()) // { value: 3, done: false }
+console.log(iterator.next()) // { value: undefined, done: true }
+
+// 数组的 values() 其实就是调用的迭代器方法
+console.log(Array.prototype.values === Array.prototype[Symbol.iterator]) // true
+```
+
+查阅了规范的 23.1.5.1 节可以知道，数组迭代器的执行会读取数组的 length 属性，如果迭代的是数组元素值，还会读取数组的索引。
+
+因此，只需要在副作用函数与数组的长度和索引之间建立响应联系即可。即不需要新增逻辑就可以使其正常工作。
+
+```js
+const arr = reactive([1, 2, 3, 4, 5])
+effect(() => {
+  for (const val of arr.values()) {
+    console.log(val)
+  }
+})
+arr[1] = 'bar'  // 能够触发响应
+arr.length = 0  // 能够触发响应
+```
+
+最后需要指出，数组的 `Symbol.iterator` 是一个 `symbol` 值，为了避免意外错误和性能问题，不应该 `track` 这类 `symbol` 值
+
+```js
+get(target, key, receiver) {
+  // ...
+  const res = Reflect.get(target, key, receiver)
+  if (!isReadonly && typeof key !== 'symbol') {
+    track(target, key) // 读取属性时收集依赖
+  }
+  if (isShallow) {
+    return res
+  }
+  // ...
+}
+```
