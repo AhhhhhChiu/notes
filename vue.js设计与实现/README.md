@@ -1657,3 +1657,28 @@ const trigger = (target, key, type, newVal) => {
   })
 }
 ```
+
+#### 遍历数组
+
+数组也是对象，因此支持用 `for...in` 对数组进行遍历，虽然并不建议这么做，但语法上可行我们也需要考虑到。
+
+由前文了解到 `for...in` 是由 `ownKeys` 函数拦截的，我们创造了 ITERATE_KEY 作为追踪的 key，但这是对于普通对象而言的。
+
+对于数组来说，有两种操作会影响到 `for...in` 循环对数组的遍历:
+
+```js
+arr[100] = 'bar' // 添加新元素
+arr.length = 0   // 修改 length 的值
+```
+
+这两种操作本质上都是修改了数组的 `length`，因此我们可以在 `ownKeys` 拦截函数内，判断当前操作目标 `target` 是否是数组，如果是，则使用 `length` 作为 key 去建立响应联系
+
+```js
+ownKeys(target) {
+  // 数组则以 length 作为 key
+  track(target, Array.isArray(ITERATE_KEY) ? 'length' : ITERATE_KEY)
+  return Reflect.ownKeys(target)
+}
+```
+
+

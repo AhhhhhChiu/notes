@@ -149,7 +149,7 @@ const createReactive = (data, isShallow, isReadonly) => new Proxy(data, {
     return Reflect.has(target, key, receiver)
   },
   ownKeys(target) { // 拦截 for...in
-    track(target, ITERATE_KEY)
+    track(target, Array.isArray(target) ? 'length' : ITERATE_KEY)
     return Reflect.ownKeys(target)
   },
   deleteProperty(target, key) {
@@ -241,17 +241,11 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
-const arr = reactive(['foo']) // 数组的原长度为 1
-
+const arr = reactive(['foo'])
 effect(() => {
-  console.log('length: ', arr.length) // 1
+  for (const index in arr) {
+    console.log('for...in ', index)
+  }
 })
-// 设置索引 1 的值，会导致数组的长度变为 2
 arr[1] = 'bar'
-// -------------------------------------------------
-console.log('---')
-// -------------------------------------------------
-effect(() => {
-  console.log('item: ', arr[0])
-})
 arr.length = 0
