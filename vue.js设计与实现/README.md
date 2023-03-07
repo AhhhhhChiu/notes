@@ -1822,7 +1822,7 @@ console.log(arr.includes(obj))  // false
 const arrayInstrumentations = {}
 ;['includes', 'indexOf', 'lastIndexOf'].forEach((method) => { // indexOf 和 lastIndexOf 也需要做相同的操作 一并处理了
   const originMethod = Array.prototype[method]
-  const arrayInstrumentations[method] = function(...args) {
+  arrayInstrumentations[method] = function(...args) {
     let res = originMethod.apply(this, args)
     // 如果代理对象中没有找到则通过原始对象查找
     if (res === false) {

@@ -108,12 +108,31 @@ const trigger = (target, key, type, newVal) => {
 }
 
 /**
+ * 重写数组方法
+ */
+const arrayInstrumentations = {}
+;['includes', 'indexOf', 'lastIndexOf'].forEach((method) => { // indexOf 和 lastIndexOf 也需要做相同的操作 一并处理了
+  const originMethod = Array.prototype[method]
+  arrayInstrumentations[method] = function(...args) {
+    let res = originMethod.apply(this, args)
+    // 如果代理对象中没有找到则通过原始对象查找
+    if (res === false) {
+      res = originMethod.apply(this.raw, args)
+    }
+    return res
+  }
+})
+
+/**
  * 代理
  */
 const createReactive = (data, isShallow, isReadonly) => new Proxy(data, {
   get(target, key, receiver) {
     if (key === 'raw') {
       return target
+    }
+    if (Array.isArray(target) && arrayInstrumentations.hasOwnProperty(key)) {
+      return Reflect.get(arrayInstrumentations, key, receiver)
     }
     const res = Reflect.get(target, key, receiver)
     if (!isReadonly && typeof key !== 'symbol') {
@@ -251,4 +270,4 @@ const watch = (data, callback, options) => {
  const obj = {}
  const arr = reactive([obj])
  
- console.log(arr.includes(arr[0]))  // false
+ console.log(arr.includes(obj))
