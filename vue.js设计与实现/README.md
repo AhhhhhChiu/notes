@@ -1751,3 +1751,56 @@ get(target, key, receiver) {
   // ...
 }
 ```
+
+#### 数组的查找方法
+
+数组的内部方法其实都依赖了对象的基本语义，所以大部分情况都不需要额外的处理，这里有个例外：
+
+```js
+const obj = {}
+const arr = reactive([obj])
+console.log(arr.includes(arr[0]))  // false
+```
+
+查阅了规范的 23.1.3.13 节
+
+>1. Let O be ? ToObject(this value).  
+>...
+
+>10. Repeat, while k < len,  
+>  a. Let elementK be ? Get(O, ! ToString(𝔽(k))).  
+>  b. If SameValueZero(searchElement, elementK) is true, return true.  
+>  c. Set k to k + 1.
+
+得知 `includes` 方法会通过索引读取数组元素的值，在第一步中的 `this` 指代的其实是代理对象 `arr`，到第十步去索引代理对象的元素做比较输出结果。
+
+我们再回头看这句代码：`arr.includes(arr[0])`。其中，`arr[0]` 得到的是一个代理对象，而在 `includes` 方法内部也会通过 `arr` 访问数组元素，从而也得到一个代理对象，问题是这两个代理对象是不同的。
+
+```js
+function createReactive(data, isShallow, isReadonly) {
+  return new Proxy(data, {
+    //...
+    if (typeof res === 'object' && res !== null) {
+      return isReadonly ? readonly(res) : reactive(res) // reactive() 会返回一个新的代理对象
+    }
+    //...
+  }）
+}
+```
+
+即使参数相同，每次调用 `reactive` 函数也都会返回新的代理对象。因此，我们要避免 `reactive` 创建重复对象，这个问题就会迎刃而解。
+
+```js
+// 维护一个 Map 实例来存储原始对象和代理对象之间的映射关系
+const reactiveMap = new Map()
+const reactive = (obj) => {
+  // 如果已经存在代理对象则直接返回
+  const existedProxy = reactiveMap.get(obj)
+  if (existedProxy) return existedProxy
+
+  // 没有再进行创建 存储映射关系 返回新的代理对象
+  const res = createReactive(obj)
+  reactiveMap.set(obj, res)
+  return res
+}
+```

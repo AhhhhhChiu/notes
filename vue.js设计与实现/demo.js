@@ -169,7 +169,14 @@ const createReactive = (data, isShallow, isReadonly) => new Proxy(data, {
 /**
  * 深响应和浅响应封装
  */
-const reactive = (obj) => createReactive(obj)
+const reactiveMap = new Map()
+const reactive = (obj) => {
+  const existedProxy = reactiveMap.get(obj)
+  if (existedProxy) return existedProxy
+  const res = createReactive(obj)
+  reactiveMap.set(obj, res)
+  return res
+}
 const shallowReactive = (obj) => createReactive(obj, true)
 
 /**
@@ -241,11 +248,7 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
-const arr = reactive(['foo'])
-effect(() => {
-  for (const index in arr) {
-    console.log('for...in ', index)
-  }
-})
-arr[1] = 'bar'
-arr.length = 0
+ const obj = {}
+ const arr = reactive([obj])
+ 
+ console.log(arr.includes(arr[0]))  // false
