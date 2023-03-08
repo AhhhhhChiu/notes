@@ -1844,3 +1844,37 @@ get(target, key, receiver) {
   // ...
 }
 ```
+
+#### 隐式修改数组长度的原型方法
+
+`push/pop/shift/unshift/splice` 都会隐式修改数组长度，我们以 `push` 为例子
+
+```js
+const arr = reactive([1])
+effect(() => { arr.push(1) })
+effect(() => { arr.push(1) }) // Maximum call stack size exceeded
+```
+
+上面代码会导致栈溢出，查阅了规范的 23.1.3.20 节，得知 `push` 方法在执行过程中，既会读取数组的 `length` 属性值，也会设置数组的 `length` 属性值。这会导致两个独立的副作用函数互相影响。
+
+因此我们只需屏蔽掉 `push` 对 `length` 的读取即可
+
+```js
+let shouldTrack = true
+// 重写数组的 push、pop、shift、unshift 以及 splice 方法
+;['push', 'pop', 'shift', 'unshift', 'splice'].forEach(method => {
+  const originMethod = Array.prototype[method]
+  arrayInstrumentations[method] = function(...args) {
+    shouldTrack = false
+    let res = originMethod.apply(this, args)
+    shouldTrack = true
+    return res
+  }
+})
+
+function track(target, key) {
+  // 当禁止追踪时，直接返回
+  if (!activeEffect || !shouldTrack) return
+  // 省略部分代码
+}
+```

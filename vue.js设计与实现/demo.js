@@ -43,7 +43,7 @@ const ITERATE_KEY = Symbol()
 const bucket = new WeakMap()
 const track = (target, key) => {
   console.log('track', key)
-  if (!activeEffect) return 
+  if (!activeEffect || !shouldTrack) return 
   let depsMap = bucket.get(target)
   if (!depsMap) bucket.set(target, (depsMap = new Map()))
   let deps = depsMap.get(key)
@@ -119,6 +119,17 @@ const arrayInstrumentations = {}
     if (res === false) {
       res = originMethod.apply(this.raw, args)
     }
+    return res
+  }
+})
+let shouldTrack = true
+// 重写数组的 push、pop、shift、unshift 以及 splice 方法
+;['push', 'pop', 'shift', 'unshift', 'splice'].forEach(method => {
+  const originMethod = Array.prototype[method]
+  arrayInstrumentations[method] = function(...args) {
+    shouldTrack = false
+    let res = originMethod.apply(this, args)
+    shouldTrack = true
     return res
   }
 })
@@ -267,7 +278,6 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
- const obj = {}
- const arr = reactive([obj])
- 
- console.log(arr.includes(obj))
+const arr = reactive([1])
+effect(() => { arr.push(1) })
+effect(() => { arr.push(1) })
