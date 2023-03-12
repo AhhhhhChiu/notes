@@ -142,6 +142,14 @@ const createReactive = (data, isShallow, isReadonly) => new Proxy(data, {
     if (key === 'raw') {
       return target
     }
+    // 书中并没有提到如何融合进 reactive，大概是这样?
+    const type = Object.prototype.toString.call(target).match(/^\[object (.*)\]$/)[1].toLowerCase()
+    if (type === 'set' || type === 'map') {
+      if (key === 'size') {
+        return Reflect.get(target, key, target)
+      }
+      return target[key].bind(target)
+    }
     if (Array.isArray(target) && arrayInstrumentations.hasOwnProperty(key)) {
       return Reflect.get(arrayInstrumentations, key, receiver)
     }
@@ -278,6 +286,6 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
-const arr = reactive([1])
-effect(() => { arr.push(1) })
-effect(() => { arr.push(1) })
+const p = reactive(new Set([1, 2, 3]))
+console.log(p.size)
+p.delete(1)

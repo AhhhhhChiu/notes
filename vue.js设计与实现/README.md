@@ -1878,3 +1878,42 @@ function track(target, key) {
   // 省略部分代码
 }
 ```
+
+### 代理 Set 和 Map
+
+#### 如何代理 Set 和 Map
+
+`Set` 和 `Map` 类型的数据有特定的属性和方法用来操作自身，因此我们不能像代理普通对象那样去代理它们。
+
+```js
+const s = new Set([1, 2, 3])
+const p = new Proxy(s, {/** */})
+
+console.log(p.size) // error 在不兼容的 receiver 上调用了 get Set.prototype.size 方法
+p.delete(1) // TypeError: Method Set.prototype.delete called on incompatible receiver [object Object]
+```
+
+查阅规范 24.2.3.9 得知，`Set.prototype.size` 是一个访问器属性，访问时会取 `this（这里指代理对象）` ，然后检查对象是否存在内部槽 `[[SetData]]`，因为代理对象不存在这个内部槽，所以会报错。因此我们需要修正这个 `this` 的指向。
+
+```js
+get(target, key, receiver) {
+  if (key === 'size') {
+    return Reflect.get(target, key, target) // 将 receiver 指向 target 自己
+  }
+  // ...
+}
+```
+
+`delete` 的错误也类似，但有些区别。因为 `p.delete` 时，`delete` 方法并没有执行，真正使其执行的语句是 `p.delete(1)` 这句函数调用。因此无论怎么修改 `receiver` 的指向，在 `delete` 方法执行时候，方法内部的 `this` 总是会指向调用方也就是代理对象 `p`。
+
+要想解决这个问题，我们需要把 `delete` 方法与原始数据对象绑定
+
+```js
+get(target, key, receiver) {
+  if (key === 'size') {
+    track(target, ITERATE_KEY)
+    return Reflect.get(target, key, target)
+  }
+  return target[key].bind(target) // this 指向 target 自身
+}
+```
