@@ -135,6 +135,26 @@ let shouldTrack = true
 })
 
 /**
+ * 重写 Set 和 Map 方法
+ */
+const mutableInstrumentations = {
+  add(key) {
+    const target = this.raw
+    const hasKey = target.has(key)
+    const res = target.add(key)
+    !hasKey && trigger(target, key, TriggerType.ADD) 
+    return res
+  },
+  delete(key) {
+    const target = this.raw
+    const hasKey = target.has(key)
+    const res = target.delete(key)
+    hasKey && trigger(target, key, TriggerType.DELETE) 
+    return res
+  }
+}
+
+/**
  * 代理
  */
 const createReactive = (data, isShallow, isReadonly) => new Proxy(data, {
@@ -146,9 +166,10 @@ const createReactive = (data, isShallow, isReadonly) => new Proxy(data, {
     const type = Object.prototype.toString.call(target).match(/^\[object (.*)\]$/)[1].toLowerCase()
     if (type === 'set' || type === 'map') {
       if (key === 'size') {
+        track(target, ITERATE_KEY)
         return Reflect.get(target, key, target)
       }
-      return target[key].bind(target)
+      return mutableInstrumentations[key]
     }
     if (Array.isArray(target) && arrayInstrumentations.hasOwnProperty(key)) {
       return Reflect.get(arrayInstrumentations, key, receiver)
@@ -287,5 +308,10 @@ const watch = (data, callback, options) => {
  * 使用
  */
 const p = reactive(new Set([1, 2, 3]))
-console.log(p.size)
-p.delete(1)
+effect(() => {
+  console.log('size: ', p.size)
+})
+p.add(1) // 不触发响应
+p.add(4) // 触发响应
+p.delete(1) // 触发响应
+p.delete(5) // 不触发响应

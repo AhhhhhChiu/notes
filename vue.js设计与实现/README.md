@@ -1917,3 +1917,54 @@ get(target, key, receiver) {
   return target[key].bind(target) // this 指向 target 自身
 }
 ```
+
+#### 建立响应联系
+
+```js
+const p = reactive(new Set([1, 2, 3]))
+
+effect(() => {
+  // 在副作用函数内访问 size 属性
+  console.log(p.size)
+})
+// 添加值为 1 的元素，应该触发响应
+p.add(1)
+```
+
+为了实现以上功能，我们需要在访问 `.size` 时调用 `track` 函数进行依赖追踪，然后在 `add` 方法执行时调用 `trigger` 函数触发响应
+
+```js
+const mutableInstrumentations = {
+  add(key) {
+    // proxyObj.add(xxx) 时 this 指向代理对象，那 .raw 指向原始对象
+    const target = this.raw
+    const hasKey = target.has(key)
+    // 使用原始对象直接 .add 则不需要 bind
+    const res = target.add(key)
+    // 只有 add 原始对象不存在的 key 才会 trigger，而传入 ADD 类型，在 trigger 内部会触发 ITERATE_KEY 相关依赖
+    !hasKey && trigger(target, key, 'ADD') 
+    return res
+  }
+}
+get(target, key, receiver) {
+  if (key === 'raw') return target
+  if (key === 'size') {
+    track(target, key, receiver) // 建立响应性联系
+    return Reflect.get(target, ITERATE_KEY)
+  }
+  return mutableInstrumentations[key]
+}
+```
+
+`delete` 方法也类似
+
+```js
+delete(key) {
+  const target = this.raw
+  const hasKey = target.has(key)
+  const res = target.delete(key)
+  // 这里变成了原本存在该 key 才触发响应
+  hasKey && trigger(target, key, 'DELETE')
+  return res
+}
+```
