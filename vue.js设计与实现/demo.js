@@ -151,6 +151,27 @@ const mutableInstrumentations = {
     const res = target.delete(key)
     hasKey && trigger(target, key, TriggerType.DELETE) 
     return res
+  },
+  get(key) {
+    const target = this.raw
+    const hasKey = target.has(key)
+    track(target, key)
+    if (hasKey) {
+      const res = target.get(key)
+      return typeof res === 'object' ? reactive(obj) : res // 省略了具体的递归判断逻辑
+    }
+  },
+  set(key, value) {
+    const target = this.raw
+    const hasKey = target.has(key)
+    const oldVal = target.get(key)
+    const rawValue = value.raw || value // 避免将 value 原封不动设置到原始数据上
+    target.set(key, rawValue)
+    if (!hasKey) {
+      trigger(target, key, TriggerType.ADD)
+    } else if (oldVal !== value || (oldVal === oldVal && value === value)) {
+      trigger(target, key, TriggerType.SET) 
+    }
   }
 }
 
@@ -307,11 +328,14 @@ const watch = (data, callback, options) => {
 /**
  * 使用
  */
-const p = reactive(new Set([1, 2, 3]))
+const m = new Map()
+const p1 = reactive(m)
+const p2 = reactive(new Map())
+
+p1.set('p2', p2)
+console.log('---')
 effect(() => {
-  console.log('size: ', p.size)
+  console.log(m.get('p2').size)
 })
-p.add(1) // 不触发响应
-p.add(4) // 触发响应
-p.delete(1) // 触发响应
-p.delete(5) // 不触发响应
+console.log('---')
+m.get('p2').set('foo', 1)

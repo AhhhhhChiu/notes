@@ -1968,3 +1968,64 @@ delete(key) {
   return res
 }
 ```
+
+#### 避免污染原始数据
+
+借助 `Map` 的 `set` 和 `get` 方法来说明什么是污染原始数据
+
+```js
+const p = reactive(new Map([['key', 1]]))
+effect(() => {
+  console.log(p.get('key'))
+})
+p.set('key', 2) // 触发响应
+```
+
+要想实现以上功能，我们需要重写 `Map` 的 `set` 和 `get` 方法
+
+```js
+get(key) {
+  const target = this.raw
+  const hasKey = target.has(key)
+  track(target, key)
+  if (hasKey) {
+    const res = target.get(key)
+    return typeof res === 'object' ? reactive(obj) : res // 省略了具体的递归判断逻辑
+  }
+},
+set(key, value) {
+  const target = this.raw
+  const hasKey = target.has(key)
+  const oldVal = target.get(key)
+  target.set(key, value)
+  if (!hasKey) {
+    trigger(target, key, TriggerType.ADD)
+  } else if (oldVal !== value || (oldVal === oldVal && value === value)) {
+    trigger(target, key, TriggerType.SET) 
+  }
+}
+```
+
+上面给出的 `set` 函数的实现能够正常工作，但它仍然存在问题，即 `set` 方法会污染原始数据。这是什么意思呢？来看下面的代码
+
+```js
+const m = new Map()
+const p1 = reactive(m)
+const p2 = reactive(new Map())
+p1.set('p2', p2)
+effect(() => {
+  console.log(m.get('p2').size) // 通过原始数据 m 来读取数据值
+})
+m.get('p2').set('foo', 1) // 通过原始数据 m 设置数据值，却触发了副作用函数的重新执行，这是不合理的
+```
+
+原因在于重写的 `set` 方法中，我们通过 `target.set(key, value)`，将 `value` 原封不动地设置到原始对象上了，我们把**响应式数据设置到原始数据上的行为称为数据污染**
+
+```js
+set(key, value) {
+  // ...
+  const rawValue = value.raw || value // 避免将 value 原封不动设置到原始数据上
+  target.set(key, rawValue)
+  // ...
+}
+```
