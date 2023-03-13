@@ -2029,3 +2029,64 @@ set(key, value) {
   // ...
 }
 ```
+
+#### 处理 forEach
+
+遍历操作只与键值对的数量有关，因此任何会修改 Map 对象键值对数量的操作都应该触发副作用函数重新执行，例如 delete 和 add 方法等
+
+```js
+const mutableInstrumentations = {
+  forEach(callback) {
+    // 取得原始数据对象
+    const target = this.raw
+    // 与 ITERATE_KEY 建立响应联系
+    track(target, ITERATE_KEY)
+    // 通过原始数据对象调用 forEach 方法，并把 callback 传递过去
+    target.forEach(callback)
+  }
+}
+```
+
+重写 `forEach` 方法后可以使其具有响应性，但以上代码仍有缺陷
+
+```js
+const key = { key: 1 }
+const value = new Set([1, 2, 3])
+const p = reactive(new Map([
+  [key, value]
+]))
+effect(() => {
+  p.forEach(function (value, key) {
+    console.log(value.size) // 
+  })
+})
+p.get(key).delete(1) // 并没有触发副作用函数的重新执行
+```
+
+问题在于我们调用了原始的 `forEach` 方法，这使得传入的 `callback` 的参数是非响应性的，因此需要完善一下逻辑
+
+```js
+forEach(callback) {
+  // wrap 函数可以将可代理数据转换为响应式数据
+  const wrap = (val) => typeof val === 'object' ? reactive(val) : val
+  const target = this.raw
+  track(target, ITERATE_KEY)
+  target.forEach((v, k) => {
+    // 将参数包装为响应式再传入
+    callback(wrap(v), wrap(k), this)
+  })
+}
+```
+
+另外，`forEach` 本身也接收第二个参数，用来指定 `callback` 函数执行时的 `this` 值
+
+```js
+forEach(callback, thisArg) {
+  const wrap = (val) => typeof val === 'object' ? reactive(val) : val
+  const target = this.raw
+  track(target, ITERATE_KEY)
+  target.forEach((v, k) => {
+    callback.call(thisArg, wrap(v), wrap(k), this)
+  })
+}
+```
